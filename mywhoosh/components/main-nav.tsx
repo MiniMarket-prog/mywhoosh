@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { BarChart3, Bell, Home, Package, ShoppingCart, Users } from 'lucide-react'
+import { BarChart3, Bell, Home, Package, ShoppingCart, Users, Receipt, DollarSign } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 
 const adminLinks = [
@@ -11,7 +11,8 @@ const adminLinks = [
   { name: "Point of Sale", href: "/pos", icon: ShoppingCart },
   { name: "Inventory", href: "/inventory", icon: Package },
   { name: "Alerts", href: "/alerts", icon: Bell },
-  { name: "Sales", href: "/sales", icon: ShoppingCart },
+  { name: "Sales", href: "/sales", icon: Receipt },
+  { name: "Expenses", href: "/expenses", icon: DollarSign },
   { name: "Reports", href: "/reports", icon: BarChart3 },
   { name: "User Management", href: "/users", icon: Users },
 ]
@@ -20,6 +21,7 @@ const cashierLinks = [
   { name: "Dashboard", href: "/dashboard", icon: Home },
   { name: "Point of Sale", href: "/pos", icon: ShoppingCart },
   { name: "Alerts", href: "/alerts", icon: Bell },
+  { name: "Expenses", href: "/expenses", icon: DollarSign },
 ]
 
 export function MainNav() {
@@ -50,3 +52,4 @@ export function MainNav() {
     </nav>
   )
 }
+

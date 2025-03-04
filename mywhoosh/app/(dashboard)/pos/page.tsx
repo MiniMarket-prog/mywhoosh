@@ -2,6 +2,7 @@
 
 import type React from "react"
 
+import { useEffect, useState, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -22,8 +23,8 @@ import {
   DollarSign,
   Receipt,
   RotateCcw,
+  AlertCircle,
 } from "lucide-react"
-import { useEffect, useState, useRef } from "react"
 import { useAuth } from "@/contexts/auth-context"
 import {
   Dialog,
@@ -33,6 +34,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 type Product = {
   id: string
@@ -49,6 +51,16 @@ type CartItem = {
   subtotal: number
 }
 
+type ContinueSaleData = {
+  id: string
+  items: {
+    product: Product
+    quantity: number
+    subtotal: number
+  }[]
+  payment_method: string
+}
+
 export default function POSPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
@@ -61,7 +73,6 @@ export default function POSPage() {
   const { user } = useAuth()
   const barcodeInputRef = useRef<HTMLInputElement>(null)
   const [recentProducts, setRecentProducts] = useState<Product[]>([])
-  const [isCalculatorOpen, setIsCalculatorOpen] = useState(false)
   const [isChangeCalculatorOpen, setIsChangeCalculatorOpen] = useState(false)
   const [amountReceived, setAmountReceived] = useState("")
   const [lastCompletedSale, setLastCompletedSale] = useState<{
@@ -71,32 +82,12 @@ export default function POSPage() {
     paymentMethod: string
     date: Date
   } | null>(null)
+  const quickAmounts = [5, 10, 20, 50, 100]
   const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false)
-  const [quickAmounts, setQuickAmounts] = useState<number[]>([5, 10, 20, 50, 100])
+  const [continuedSaleId, setContinuedSaleId] = useState<string | null>(null)
+  const [isContinuedSaleAlertOpen, setIsContinuedSaleAlertOpen] = useState(false)
 
-  useEffect(() => {
-    fetchProducts()
-    fetchRecentProducts()
-
-    // Focus the barcode input on page load
-    if (barcodeInputRef.current) {
-      barcodeInputRef.current.focus()
-    }
-  }, [])
-
-  useEffect(() => {
-    if (searchTerm) {
-      const filtered = products.filter(
-        (product) =>
-          product.name.toLowerCase().includes(searchTerm.toLowerCase()) || product.barcode.includes(searchTerm),
-      )
-      setFilteredProducts(filtered)
-    } else {
-      setFilteredProducts(products)
-    }
-  }, [searchTerm, products])
-
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     setIsLoading(true)
 
     const { data, error } = await supabase.from("products").select("*").gt("stock", 0).order("name")
@@ -114,9 +105,9 @@ export default function POSPage() {
     }
 
     setIsLoading(false)
-  }
+  }, [toast])
 
-  const fetchRecentProducts = async () => {
+  const fetchRecentProducts = useCallback(async () => {
     // Get the 10 most recently sold products
     const { data: saleItems, error } = await supabase
       .from("sale_items")
@@ -143,111 +134,147 @@ export default function POSPage() {
 
       setRecentProducts(recentProductsData || [])
     }
-  }
+  }, [])
 
-  const handleBarcodeSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  // Check for continued sale data in localStorage
+  useEffect(() => {
+    const continueSaleData = localStorage.getItem("continue_sale")
 
-    if (!searchTerm) return
+    if (continueSaleData) {
+      try {
+        const saleData = JSON.parse(continueSaleData) as ContinueSaleData
 
-    // Try to find product by exact barcode match first
-    const product = products.find((p) => p.barcode === searchTerm)
+        // Set the cart with the items from the continued sale
+        const cartItems: CartItem[] = saleData.items.map((item) => ({
+          product: item.product,
+          quantity: item.quantity,
+          subtotal: item.subtotal,
+        }))
 
-    if (product) {
-      addToCart(product)
-      setSearchTerm("")
-      // Re-focus the input for the next scan
-      if (barcodeInputRef.current) {
-        barcodeInputRef.current.focus()
+        setCart(cartItems)
+        setPaymentMethod(saleData.payment_method)
+        setContinuedSaleId(saleData.id)
+        setIsContinuedSaleAlertOpen(true)
+
+        // Clear the localStorage data to prevent reloading on refresh
+        localStorage.removeItem("continue_sale")
+
+        toast({
+          title: "Sale loaded",
+          description: `Continuing sale #${saleData.id.substring(0, 8)}`,
+        })
+      } catch (error) {
+        console.error("Error parsing continued sale data:", error)
+        localStorage.removeItem("continue_sale")
       }
-    } else {
-      // If no exact match is found, keep the search term visible
-      // This allows the user to see the filtered products by name
-      // and select one manually
-      toast({
-        title: "No exact barcode match",
-        description: "Showing products matching your search term",
-      })
     }
-  }
+  }, [toast])
 
-  const addToCart = (product: Product) => {
-    setCart((prevCart) => {
-      const existingItem = prevCart.find((item) => item.product.id === product.id)
+  useEffect(() => {
+    fetchProducts()
+    fetchRecentProducts()
 
-      if (existingItem) {
-        // Check if we have enough stock
-        if (existingItem.quantity >= product.stock) {
-          toast({
-            title: "Stock limit reached",
-            description: `Only ${product.stock} items available in stock`,
-            variant: "destructive",
-          })
-          return prevCart
-        }
+    // Focus the barcode input on page load
+    if (barcodeInputRef.current) {
+      barcodeInputRef.current.focus()
+    }
+  }, [fetchProducts, fetchRecentProducts])
 
-        return prevCart.map((item) =>
-          item.product.id === product.id
-            ? {
-                ...item,
-                quantity: item.quantity + 1,
-                subtotal: (item.quantity + 1) * item.product.price,
-              }
-            : item,
-        )
-      }
+  useEffect(() => {
+    if (searchTerm) {
+      const filtered = products.filter(
+        (product) =>
+          product.name.toLowerCase().includes(searchTerm.toLowerCase()) || product.barcode.includes(searchTerm),
+      )
+      setFilteredProducts(filtered)
+    } else {
+      setFilteredProducts(products)
+    }
+  }, [searchTerm, products])
 
-      // Play a beep sound when adding to cart
-      const audio = new Audio("/beep.mp3")
-      audio.play().catch((e) => console.log("Audio play failed:", e))
+  const addToCart = useCallback(
+    (product: Product) => {
+      setCart((prevCart) => {
+        const existingItem = prevCart.find((item) => item.product.id === product.id)
 
-      return [
-        ...prevCart,
-        {
-          product,
-          quantity: 1,
-          subtotal: product.price,
-        },
-      ]
-    })
-  }
-
-  const removeFromCart = (productId: string) => {
-    setCart((prevCart) => prevCart.filter((item) => item.product.id !== productId))
-  }
-
-  const updateQuantity = (productId: string, newQuantity: number) => {
-    if (newQuantity < 1) return
-
-    setCart((prevCart) =>
-      prevCart.map((item) => {
-        if (item.product.id === productId) {
+        if (existingItem) {
           // Check if we have enough stock
-          if (newQuantity > item.product.stock) {
+          if (existingItem.quantity >= product.stock) {
             toast({
               title: "Stock limit reached",
-              description: `Only ${item.product.stock} items available in stock`,
+              description: `Only ${product.stock} items available in stock`,
               variant: "destructive",
             })
-            return item
+            return prevCart
           }
 
-          return {
-            ...item,
-            quantity: newQuantity,
-            subtotal: newQuantity * item.product.price,
-          }
+          return prevCart.map((item) =>
+            item.product.id === product.id
+              ? {
+                  ...item,
+                  quantity: item.quantity + 1,
+                  subtotal: (item.quantity + 1) * item.product.price,
+                }
+              : item,
+          )
         }
-        return item
-      }),
-    )
-  }
 
-  const calculateTotal = () => {
+        // Play a beep sound when adding to cart
+        const audio = new Audio("/beep.mp3")
+        audio.play().catch((e) => console.log("Audio play failed:", e))
+
+        return [
+          ...prevCart,
+          {
+            product,
+            quantity: 1,
+            subtotal: product.price,
+          },
+        ]
+      })
+    },
+    [toast],
+  )
+
+  const removeFromCart = useCallback((productId: string) => {
+    setCart((prevCart) => prevCart.filter((item) => item.product.id !== productId))
+  }, [])
+
+  const updateQuantity = useCallback(
+    (productId: string, newQuantity: number) => {
+      if (newQuantity < 1) return
+
+      setCart((prevCart) =>
+        prevCart.map((item) => {
+          if (item.product.id === productId) {
+            // Check if we have enough stock
+            if (newQuantity > item.product.stock) {
+              toast({
+                title: "Stock limit reached",
+                description: `Only ${item.product.stock} items available in stock`,
+                variant: "destructive",
+              })
+              return item
+            }
+
+            return {
+              ...item,
+              quantity: newQuantity,
+              subtotal: newQuantity * item.product.price,
+            }
+          }
+          return item
+        }),
+      )
+    },
+    [toast],
+  )
+
+  const calculateTotal = useCallback(() => {
     return cart.reduce((total, item) => total + item.subtotal, 0)
-  }
+  }, [cart])
 
-  const handleCheckout = async () => {
+  const handleCheckout = useCallback(async () => {
     if (cart.length === 0) {
       toast({
         title: "Empty cart",
@@ -260,56 +287,134 @@ export default function POSPage() {
     setIsProcessing(true)
 
     try {
-      // Create sale record
-      const { data: saleData, error: saleError } = await supabase
-        .from("sales")
-        .insert({
-          cashier_id: user?.id || "",
-          total: calculateTotal(),
-          payment_method: paymentMethod,
-          status: "completed",
+      // If this is a continued sale, update the existing sale
+      if (continuedSaleId) {
+        // First, get the original sale items to handle stock properly
+        const { data: originalItems, error: originalItemsError } = await supabase
+          .from("sale_items")
+          .select("*")
+          .eq("sale_id", continuedSaleId)
+
+        if (originalItemsError) throw originalItemsError
+
+        // Delete all original sale items
+        const { error: deleteItemsError } = await supabase.from("sale_items").delete().eq("sale_id", continuedSaleId)
+
+        if (deleteItemsError) throw deleteItemsError
+
+        // Restore stock for all original items
+        for (const item of originalItems || []) {
+          const { error: stockError } = await supabase.rpc("increment_stock", {
+            product_id: item.product_id,
+            quantity: item.quantity,
+          })
+
+          if (stockError) throw stockError
+        }
+
+        // Create new sale items
+        const saleItems = cart.map((item) => ({
+          sale_id: continuedSaleId,
+          product_id: item.product.id,
+          quantity: item.quantity,
+          price: item.product.price,
+          subtotal: item.subtotal,
+        }))
+
+        const { error: itemsError } = await supabase.from("sale_items").insert(saleItems)
+
+        if (itemsError) throw itemsError
+
+        // Update the sale total and payment method
+        const { error: updateSaleError } = await supabase
+          .from("sales")
+          .update({
+            total: calculateTotal(),
+            payment_method: paymentMethod,
+            status: "completed",
+          })
+          .eq("id", continuedSaleId)
+
+        if (updateSaleError) throw updateSaleError
+
+        // Update product stock
+        for (const item of cart) {
+          const { error: stockError } = await supabase
+            .from("products")
+            .update({ stock: item.product.stock - item.quantity })
+            .eq("id", item.product.id)
+
+          if (stockError) throw stockError
+        }
+
+        toast({
+          title: "Sale updated",
+          description: `Total: $${calculateTotal().toFixed(2)}`,
         })
-        .select()
 
-      if (saleError) throw saleError
+        setLastCompletedSale({
+          id: continuedSaleId,
+          items: [...cart],
+          total: calculateTotal(),
+          paymentMethod,
+          date: new Date(),
+        })
 
-      const saleId = saleData[0].id
+        // Reset continued sale state
+        setContinuedSaleId(null)
+        setIsContinuedSaleAlertOpen(false)
+      } else {
+        // Create a new sale record
+        const { data: saleData, error: saleError } = await supabase
+          .from("sales")
+          .insert({
+            cashier_id: user?.id || "",
+            total: calculateTotal(),
+            payment_method: paymentMethod,
+            status: "completed",
+          })
+          .select()
 
-      // Create sale items
-      const saleItems = cart.map((item) => ({
-        sale_id: saleId,
-        product_id: item.product.id,
-        quantity: item.quantity,
-        price: item.product.price,
-        subtotal: item.subtotal,
-      }))
+        if (saleError) throw saleError
 
-      const { error: itemsError } = await supabase.from("sale_items").insert(saleItems)
+        const saleId = saleData[0].id
 
-      if (itemsError) throw itemsError
+        // Create sale items
+        const saleItems = cart.map((item) => ({
+          sale_id: saleId,
+          product_id: item.product.id,
+          quantity: item.quantity,
+          price: item.product.price,
+          subtotal: item.subtotal,
+        }))
 
-      // Update product stock
-      for (const item of cart) {
-        const { error: stockError } = await supabase
-          .from("products")
-          .update({ stock: item.product.stock - item.quantity })
-          .eq("id", item.product.id)
+        const { error: itemsError } = await supabase.from("sale_items").insert(saleItems)
 
-        if (stockError) throw stockError
+        if (itemsError) throw itemsError
+
+        // Update product stock
+        for (const item of cart) {
+          const { error: stockError } = await supabase
+            .from("products")
+            .update({ stock: item.product.stock - item.quantity })
+            .eq("id", item.product.id)
+
+          if (stockError) throw stockError
+        }
+
+        toast({
+          title: "Sale completed",
+          description: `Total: $${calculateTotal().toFixed(2)}`,
+        })
+
+        setLastCompletedSale({
+          id: saleId,
+          items: [...cart],
+          total: calculateTotal(),
+          paymentMethod,
+          date: new Date(),
+        })
       }
-
-      toast({
-        title: "Sale completed",
-        description: `Total: $${calculateTotal().toFixed(2)}`,
-      })
-
-      setLastCompletedSale({
-        id: saleId,
-        items: [...cart],
-        total: calculateTotal(),
-        paymentMethod,
-        date: new Date(),
-      })
 
       // Reset cart
       setCart([])
@@ -323,17 +428,18 @@ export default function POSPage() {
       if (barcodeInputRef.current) {
         barcodeInputRef.current.focus()
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to process sale"
       console.error("Error processing sale:", error)
       toast({
         title: "Error",
-        description: error.message || "Failed to process sale",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
       setIsProcessing(false)
     }
-  }
+  }, [cart, paymentMethod, toast, user?.id, calculateTotal, fetchProducts, fetchRecentProducts, continuedSaleId])
 
   const handleQuickAction = (amount: number) => {
     setAmountReceived(amount.toString())
@@ -350,7 +456,7 @@ export default function POSPage() {
     return received - total
   }
 
-  const handleVoidLastItem = () => {
+  const handleVoidLastItem = useCallback(() => {
     if (cart.length > 0) {
       const lastItem = cart[cart.length - 1]
       removeFromCart(lastItem.product.id)
@@ -359,9 +465,9 @@ export default function POSPage() {
         description: `${lastItem.product.name} has been removed from the cart`,
       })
     }
-  }
+  }, [cart, removeFromCart, toast])
 
-  const handleRepeatLastSale = () => {
+  const handleRepeatLastSale = useCallback(() => {
     if (!lastCompletedSale) {
       toast({
         title: "No previous sale",
@@ -394,6 +500,45 @@ export default function POSPage() {
       title: "Sale repeated",
       description: "The previous sale has been added to the cart",
     })
+  }, [lastCompletedSale, products, addToCart, toast])
+
+  const handleBarcodeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!searchTerm) return
+
+    // Try to find product by exact barcode match first
+    const product = products.find((p) => p.barcode === searchTerm)
+
+    if (product) {
+      addToCart(product)
+      setSearchTerm("")
+      // Re-focus the input for the next scan
+      if (barcodeInputRef.current) {
+        barcodeInputRef.current.focus()
+      }
+    } else {
+      // If no exact match is found, keep the search term visible
+      // This allows the user to see the filtered products by name
+      // and select one manually
+      toast({
+        title: "No exact barcode match",
+        description: "Showing products matching your search term",
+      })
+    }
+  }
+
+  // Handle canceling a continued sale
+  const handleCancelContinuedSale = () => {
+    if (confirm("Are you sure you want to cancel continuing this sale? The cart will be cleared.")) {
+      setCart([])
+      setContinuedSaleId(null)
+      setIsContinuedSaleAlertOpen(false)
+      toast({
+        title: "Sale canceled",
+        description: "The continued sale has been canceled",
+      })
+    }
   }
 
   useEffect(() => {
@@ -433,42 +578,57 @@ export default function POSPage() {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [cart, isProcessing, lastCompletedSale, products, handleCheckout, handleVoidLastItem, handleRepeatLastSale])
+  }, [cart, isProcessing, lastCompletedSale, handleCheckout, handleVoidLastItem, handleRepeatLastSale])
 
   return (
     <div className="flex flex-col lg:flex-row gap-6">
-      <div className="flex gap-2 mb-4">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setIsChangeCalculatorOpen(true)}
-          className="flex items-center gap-1"
-        >
-          <Calculator className="h-4 w-4" />
-          <span>Change Calculator (F3)</span>
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleVoidLastItem}
-          disabled={cart.length === 0}
-          className="flex items-center gap-1"
-        >
-          <RotateCcw className="h-4 w-4" />
-          <span>Void Last Item (F5)</span>
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRepeatLastSale}
-          disabled={!lastCompletedSale}
-          className="flex items-center gap-1"
-        >
-          <Receipt className="h-4 w-4" />
-          <span>Repeat Last Sale (F6)</span>
-        </Button>
-      </div>
+      {/* Alert for continued sale */}
+      {isContinuedSaleAlertOpen && continuedSaleId && (
+        <Alert className="mb-4">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Continuing Sale</AlertTitle>
+          <AlertDescription className="flex items-center justify-between">
+            <span>You are continuing sale #{continuedSaleId.substring(0, 8)}</span>
+            <Button variant="outline" size="sm" onClick={handleCancelContinuedSale}>
+              Cancel
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="lg:w-2/3 space-y-6">
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsChangeCalculatorOpen(true)}
+            className="flex items-center gap-1"
+          >
+            <Calculator className="h-4 w-4" />
+            <span>Change Calculator (F3)</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleVoidLastItem}
+            disabled={cart.length === 0}
+            className="flex items-center gap-1"
+          >
+            <RotateCcw className="h-4 w-4" />
+            <span>Void Last Item (F5)</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRepeatLastSale}
+            disabled={!lastCompletedSale}
+            className="flex items-center gap-1"
+          >
+            <Receipt className="h-4 w-4" />
+            <span>Repeat Last Sale (F6)</span>
+          </Button>
+        </div>
+
         <form onSubmit={handleBarcodeSubmit} className="flex items-center space-x-2">
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -548,7 +708,7 @@ export default function POSPage() {
         <Card className="sticky top-4">
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
-              <span>Shopping Cart</span>
+              <span>{continuedSaleId ? "Continuing Sale" : "Shopping Cart"}</span>
               {cart.length > 0 && (
                 <Button variant="ghost" size="icon" onClick={() => setCart([])}>
                   <X className="h-4 w-4" />
@@ -635,8 +795,14 @@ export default function POSPage() {
           </CardContent>
           <CardFooter className="flex flex-col gap-2">
             <Button className="w-full" size="lg" disabled={cart.length === 0 || isProcessing} onClick={handleCheckout}>
-              {isProcessing ? "Processing..." : "Checkout (F4)"}
+              {isProcessing ? "Processing..." : continuedSaleId ? "Update Sale (F4)" : "Checkout (F4)"}
             </Button>
+            {lastCompletedSale && (
+              <Button variant="outline" className="w-full" size="sm" onClick={() => setIsReceiptDialogOpen(true)}>
+                <Receipt className="mr-2 h-4 w-4" />
+                View Last Receipt
+              </Button>
+            )}
             <p className="text-xs text-muted-foreground text-center">
               Scan products with barcode scanner or search by name
             </p>
