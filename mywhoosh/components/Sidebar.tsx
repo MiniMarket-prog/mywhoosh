@@ -1,102 +1,132 @@
 "use client"
 
+import type React from "react"
+
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useLanguage } from "@/contexts/language-context"
-import {
-  BarChart3,
-  ClipboardList,
-  Home,
-  Package,
-  ShoppingCart,
-  Users,
-  Settings,
-  LogOut,
-  DollarSign,
-  Target,
-  Percent,
-  Database,
-} from "lucide-react"
+import { cn } from "@/lib/utils"
+import { useAuth } from "@/contexts/auth-context"
+import { Home, ShoppingCart, Package, Bell, Receipt, DollarSign, BarChart3, Users, ChevronDown } from "lucide-react"
+import { useState } from "react"
+import { Button } from "@/components/ui/button"
+
+type NavItem = {
+  name: string
+  href: string
+  icon: React.ElementType
+  subItems?: { name: string; href: string }[]
+}
 
 export function Sidebar() {
   const pathname = usePathname()
-  const { t, dir } = useLanguage()
+  const { profile } = useAuth()
+  const [openSubmenu, setOpenSubmenu] = useState<string | null>(null)
 
-  const isActive = (path: string) => {
-    return pathname === path || pathname.startsWith(path + "/")
-  }
+  const isAdmin = profile?.role === "admin"
 
-  const isSubItemActive = (path: string) => {
-    return pathname === path
-  }
-
-  const sidebarLinks = [
-    { name: t("nav.dashboard"), href: "/dashboard", icon: Home },
-    { name: t("nav.inventory"), href: "/inventory", icon: Package },
-    { name: t("nav.pos"), href: "/pos", icon: ShoppingCart },
-    { name: t("nav.sales"), href: "/sales", icon: ClipboardList },
-    { name: t("nav.customers"), href: "/customers", icon: Users },
+  const adminLinks: NavItem[] = [
+    { name: "Dashboard", href: "/dashboard", icon: Home },
+    { name: "Point of Sale", href: "/pos", icon: ShoppingCart },
+    { name: "Inventory", href: "/inventory", icon: Package },
+    { name: "Alerts", href: "/alerts", icon: Bell },
+    { name: "Sales", href: "/sales", icon: Receipt },
+    { name: "Expenses", href: "/expenses", icon: DollarSign },
     {
-      name: t("nav.reports"),
+      name: "Reports",
       href: "/reports",
       icon: BarChart3,
       subItems: [
-        { name: "Sales Comparison", href: "/reports/comparison", icon: DollarSign },
-        { name: "Income vs Expenses", href: "/reports/income-expenses", icon: BarChart3 },
-        { name: "Financial Goals", href: "/reports/goals", icon: Target },
-        { name: "Commissions", href: "/reports/commissions", icon: Percent },
+        { name: "Sales Reports", href: "/reports" },
+        { name: "Financial Reports", href: "/reports/finance" },
+        { name: "Financial Goals", href: "/reports/goals" },
+        { name: "Commissions", href: "/reports/commissions" },
       ],
     },
-    { name: t("nav.settings"), href: "/settings", icon: Settings },
-    { name: t("nav.setup"), href: "/setup", icon: Database },
+    { name: "User Management", href: "/users", icon: Users },
   ]
 
+  const cashierLinks: NavItem[] = [
+    { name: "Dashboard", href: "/dashboard", icon: Home },
+    { name: "Point of Sale", href: "/pos", icon: ShoppingCart },
+    { name: "Alerts", href: "/alerts", icon: Bell },
+    { name: "Expenses", href: "/expenses", icon: DollarSign },
+  ]
+
+  const links = isAdmin ? adminLinks : cashierLinks
+
+  const toggleSubmenu = (name: string) => {
+    if (openSubmenu === name) {
+      setOpenSubmenu(null)
+    } else {
+      setOpenSubmenu(name)
+    }
+  }
+
   return (
-    <aside className="w-64 bg-gray-800 text-white p-4 flex flex-col h-screen" dir={dir}>
-      <div className="text-xl font-bold mb-8">{t("app.name")}</div>
-      <nav className="flex-1">
-        <ul className="space-y-1">
-          {sidebarLinks.map((link) => (
-            <li key={link.name}>
-              <Link
-                href={link.href}
-                className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
-                  isActive(link.href) ? "bg-gray-700 text-white" : "text-gray-300 hover:bg-gray-700 hover:text-white"
-                }`}
-              >
-                <link.icon className="h-5 w-5" />
-                <span>{link.name}</span>
-              </Link>
-              {link.subItems && isActive(link.href) && (
-                <ul className="ml-6 mt-1 space-y-1">
-                  {link.subItems.map((subItem) => (
-                    <li key={subItem.name}>
-                      <Link
-                        href={subItem.href}
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${
-                          isSubItemActive(subItem.href)
-                            ? "bg-gray-700 text-white"
-                            : "text-gray-400 hover:bg-gray-700 hover:text-white"
-                        }`}
-                      >
-                        <subItem.icon className="h-4 w-4" />
-                        <span className="text-sm">{subItem.name}</span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
+    <div className="w-64 min-h-screen bg-background border-r">
+      <div className="p-4">
+        <h2 className="text-xl font-bold mb-6">Mini Market</h2>
+        <nav className="space-y-1">
+          {links.map((link) => (
+            <div key={link.name}>
+              {link.subItems ? (
+                <div>
+                  <Button
+                    variant="ghost"
+                    className={cn(
+                      "w-full justify-start text-left font-normal",
+                      pathname.startsWith(link.href) ? "bg-muted" : "",
+                    )}
+                    onClick={() => toggleSubmenu(link.name)}
+                  >
+                    <link.icon className="mr-2 h-4 w-4" />
+                    {link.name}
+                    <ChevronDown
+                      className={cn(
+                        "ml-auto h-4 w-4 transition-transform",
+                        openSubmenu === link.name ? "transform rotate-180" : "",
+                      )}
+                    />
+                  </Button>
+
+                  {openSubmenu === link.name && (
+                    <div className="ml-6 mt-1 space-y-1">
+                      {link.subItems.map((subItem) => (
+                        <Link
+                          key={subItem.href}
+                          href={subItem.href}
+                          className={cn(
+                            "block py-2 px-3 text-sm rounded-md",
+                            pathname === subItem.href
+                              ? "bg-muted text-foreground"
+                              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                          )}
+                        >
+                          {subItem.name}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <Link
+                  href={link.href}
+                  className={cn(
+                    "flex items-center py-2 px-3 text-sm rounded-md",
+                    pathname === link.href
+                      ? "bg-muted text-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                >
+                  <link.icon className="mr-2 h-4 w-4" />
+                  {link.name}
+                </Link>
               )}
-            </li>
+            </div>
           ))}
-        </ul>
-      </nav>
-      <div className="border-t border-gray-700 pt-4 mt-6">
-        <button className="flex items-center gap-3 px-3 py-2 rounded-md text-gray-300 hover:bg-gray-700 hover:text-white w-full">
-          <LogOut className="h-5 w-5" />
-          <span>{t("app.logout")}</span>
-        </button>
+        </nav>
       </div>
-    </aside>
+    </div>
   )
 }
 

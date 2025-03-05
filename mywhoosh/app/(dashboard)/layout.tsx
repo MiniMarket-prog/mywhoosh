@@ -1,7 +1,6 @@
 import type React from "react"
-import { Sidebar } from "@/components/Sidebar"
-import { Toaster } from "@/components/ui/toaster"
-import { LanguageDirectionWrapper } from "@/components/LanguageDirectionWrapper"
+import { Sidebar } from "@/components/sidebar"
+import { UserNav } from "@/components/user-nav"
 
 export default function DashboardLayout({
   children,
@@ -9,14 +8,14 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex min-h-screen bg-gray-100 dark:bg-gray-950">
+    <div className="flex min-h-screen">
       <Sidebar />
-      <main className="flex-1 ml-64 p-8 overflow-auto">
-        <LanguageDirectionWrapper>
-          <div className="max-w-7xl mx-auto">{children}</div>
-        </LanguageDirectionWrapper>
-      </main>
-      <Toaster />
+      <div className="flex-1">
+        <header className="border-b h-14 flex items-center px-4 justify-end">
+          <UserNav />
+        </header>
+        <main className="p-6">{children}</main>
+      </div>
     </div>
   )
 }

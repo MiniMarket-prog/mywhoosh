@@ -100,59 +100,115 @@ export default function POSPage() {
   const fetchProducts = useCallback(async () => {
     setIsLoading(true)
 
-    const { data, error } = await supabase.from("products").select("*").gt("stock", 0).order("name")
+    try {
+      console.log("Fetching products...")
+      const { data, error } = await supabase.from("products").select("*").gt("stock", 0).order("name")
 
-    if (error) {
-      console.error("Error fetching products:", error)
+      if (error) {
+        console.error("Error fetching products:", error, JSON.stringify(error))
+        toast({
+          title: "Error",
+          description: "Failed to fetch products",
+          variant: "destructive",
+        })
+        setProducts([])
+        setFilteredProducts([])
+      } else {
+        console.log(`Fetched ${data?.length || 0} products`)
+        setProducts(data || [])
+        setFilteredProducts(data || [])
+      }
+    } catch (err) {
+      console.error("Exception in fetchProducts:", err)
       toast({
         title: "Error",
-        description: "Failed to fetch products",
+        description: "An unexpected error occurred while fetching products",
         variant: "destructive",
       })
-    } else {
-      setProducts(data || [])
-      setFilteredProducts(data || [])
+    } finally {
+      setIsLoading(false)
     }
-
-    setIsLoading(false)
   }, [toast])
 
   const fetchRecentProducts = useCallback(async () => {
-    // Get the 10 most recently sold products
-    const { data: saleItems, error } = await supabase
-      .from("sale_items")
-      .select("product_id")
-      .order("created_at", { ascending: false })
-      .limit(20)
+    try {
+      // First check if we have an authenticated session
+      const { data: session } = await supabase.auth.getSession()
+      console.log("Session check:", session?.session ? "Authenticated" : "Not authenticated")
 
-    if (error) {
-      console.error("Error fetching recent products:", error)
-      return
-    }
+      // Get the most recent sale items without relying on created_at
+      console.log("Fetching recent sale items...")
+      const { data: saleItems, error } = await supabase
+        .from("sale_items")
+        .select("product_id")
+        .order("id", { ascending: false }) // Using id instead of created_at
+        .limit(20)
 
-    if (saleItems && saleItems.length > 0) {
+      if (error) {
+        console.error("Error fetching recent products:", error, JSON.stringify(error))
+        setRecentProducts([])
+        return
+      }
+
+      if (!saleItems || saleItems.length === 0) {
+        console.log("No sale items found")
+        setRecentProducts([])
+        return
+      }
+
+      console.log(`Found ${saleItems.length} sale items`)
+
       // Get unique product IDs
       const uniqueProductIds = Array.from(new Set(saleItems.map((item) => item.product_id)))
+      console.log(`Found ${uniqueProductIds.length} unique product IDs`)
+
+      if (uniqueProductIds.length === 0) {
+        setRecentProducts([])
+        return
+      }
 
       // Fetch product details
-      const { data: recentProductsData } = await supabase
+      console.log("Fetching product details...")
+      const { data: recentProductsData, error: productsError } = await supabase
         .from("products")
         .select("*")
         .in("id", uniqueProductIds)
         .gt("stock", 0)
         .limit(8)
 
+      if (productsError) {
+        console.error("Error fetching product details:", productsError, JSON.stringify(productsError))
+        setRecentProducts([])
+        return
+      }
+
+      console.log(`Fetched ${recentProductsData?.length || 0} recent products`)
       setRecentProducts(recentProductsData || [])
+    } catch (err) {
+      console.error("Exception in fetchRecentProducts:", err)
+      setRecentProducts([])
     }
   }, [])
 
   const fetchSettings = useCallback(async () => {
     try {
+      console.log("Fetching settings...")
       const response = await fetch("/api/settings")
+
+      if (!response.ok) {
+        console.error("Settings API returned status:", response.status)
+        setCurrency("MAD") // Default
+        return
+      }
+
       const data = await response.json()
 
       if (data.settings && data.settings.general && data.settings.general.currency) {
+        console.log("Setting currency to:", data.settings.general.currency)
         setCurrency(data.settings.general.currency)
+      } else {
+        console.log("No currency found in settings, using default")
+        setCurrency("MAD")
       }
     } catch (error) {
       console.error("Error fetching settings:", error)
@@ -167,6 +223,7 @@ export default function POSPage() {
 
     if (continueSaleData) {
       try {
+        console.log("Found continued sale data in localStorage")
         const saleData = JSON.parse(continueSaleData) as ContinueSaleData
 
         // Set the cart with the items from the continued sale
@@ -196,6 +253,7 @@ export default function POSPage() {
   }, [toast])
 
   useEffect(() => {
+    console.log("POS page mounted, initializing...")
     fetchProducts()
     fetchRecentProducts()
     fetchSettings()
@@ -315,18 +373,28 @@ export default function POSPage() {
     try {
       // If this is a continued sale, update the existing sale
       if (continuedSaleId) {
+        console.log(`Updating continued sale: ${continuedSaleId}`)
+
         // First, get the original sale items to handle stock properly
         const { data: originalItems, error: originalItemsError } = await supabase
           .from("sale_items")
           .select("*")
           .eq("sale_id", continuedSaleId)
 
-        if (originalItemsError) throw originalItemsError
+        if (originalItemsError) {
+          console.error("Error fetching original sale items:", originalItemsError)
+          throw originalItemsError
+        }
+
+        console.log(`Found ${originalItems?.length || 0} original sale items`)
 
         // Delete all original sale items
         const { error: deleteItemsError } = await supabase.from("sale_items").delete().eq("sale_id", continuedSaleId)
 
-        if (deleteItemsError) throw deleteItemsError
+        if (deleteItemsError) {
+          console.error("Error deleting original sale items:", deleteItemsError)
+          throw deleteItemsError
+        }
 
         // Restore stock for all original items
         for (const item of originalItems || []) {
@@ -335,7 +403,10 @@ export default function POSPage() {
             quantity: item.quantity,
           })
 
-          if (stockError) throw stockError
+          if (stockError) {
+            console.error("Error restoring stock:", stockError)
+            throw stockError
+          }
         }
 
         // Create new sale items
@@ -349,7 +420,10 @@ export default function POSPage() {
 
         const { error: itemsError } = await supabase.from("sale_items").insert(saleItems)
 
-        if (itemsError) throw itemsError
+        if (itemsError) {
+          console.error("Error inserting new sale items:", itemsError)
+          throw itemsError
+        }
 
         // Update the sale total and payment method
         const { error: updateSaleError } = await supabase
@@ -361,7 +435,10 @@ export default function POSPage() {
           })
           .eq("id", continuedSaleId)
 
-        if (updateSaleError) throw updateSaleError
+        if (updateSaleError) {
+          console.error("Error updating sale:", updateSaleError)
+          throw updateSaleError
+        }
 
         // Update product stock
         for (const item of cart) {
@@ -370,9 +447,13 @@ export default function POSPage() {
             .update({ stock: item.product.stock - item.quantity })
             .eq("id", item.product.id)
 
-          if (stockError) throw stockError
+          if (stockError) {
+            console.error("Error updating product stock:", stockError)
+            throw stockError
+          }
         }
 
+        console.log("Sale updated successfully")
         toast({
           title: "Sale updated",
           description: `Total: ${formatPrice(calculateTotal())}`,
@@ -394,16 +475,24 @@ export default function POSPage() {
         let cashierId = user?.id
 
         if (!cashierId) {
+          console.log("No user ID found, looking for a default profile")
           // Try to get the first available profile from the database
-          const { data: profiles } = await supabase.from("profiles").select("id").limit(1)
+          const { data: profiles, error: profilesError } = await supabase.from("profiles").select("id").limit(1)
+
+          if (profilesError) {
+            console.error("Error fetching profiles:", profilesError)
+            throw profilesError
+          }
 
           if (profiles && profiles.length > 0) {
             cashierId = profiles[0].id
+            console.log(`Using default cashier ID: ${cashierId}`)
           } else {
             throw new Error("No valid cashier profile found. Please log in or create a profile first.")
           }
         }
 
+        console.log("Creating new sale...")
         // Create a new sale record
         const { data: saleData, error: saleError } = await supabase
           .from("sales")
@@ -415,9 +504,13 @@ export default function POSPage() {
           })
           .select()
 
-        if (saleError) throw saleError
+        if (saleError) {
+          console.error("Error creating sale:", saleError)
+          throw saleError
+        }
 
         const saleId = saleData[0].id
+        console.log(`Sale created with ID: ${saleId}`)
 
         // Create sale items
         const saleItems = cart.map((item) => ({
@@ -428,20 +521,29 @@ export default function POSPage() {
           subtotal: item.subtotal,
         }))
 
+        console.log(`Creating ${saleItems.length} sale items`)
         const { error: itemsError } = await supabase.from("sale_items").insert(saleItems)
 
-        if (itemsError) throw itemsError
+        if (itemsError) {
+          console.error("Error creating sale items:", itemsError)
+          throw itemsError
+        }
 
         // Update product stock
+        console.log("Updating product stock...")
         for (const item of cart) {
           const { error: stockError } = await supabase
             .from("products")
             .update({ stock: item.product.stock - item.quantity })
             .eq("id", item.product.id)
 
-          if (stockError) throw stockError
+          if (stockError) {
+            console.error(`Error updating stock for product ${item.product.id}:`, stockError)
+            throw stockError
+          }
         }
 
+        console.log("Sale completed successfully")
         toast({
           title: "Sale completed",
           description: `Total: ${formatPrice(calculateTotal())}`,
