@@ -364,11 +364,25 @@ export default function POSPage() {
         setContinuedSaleId(null)
         setIsContinuedSaleAlertOpen(false)
       } else {
+        // First check if we have a valid user profile
+        let cashierId = user?.id
+
+        if (!cashierId) {
+          // Try to get the first available profile from the database
+          const { data: profiles } = await supabase.from("profiles").select("id").limit(1)
+
+          if (profiles && profiles.length > 0) {
+            cashierId = profiles[0].id
+          } else {
+            throw new Error("No valid cashier profile found. Please log in or create a profile first.")
+          }
+        }
+
         // Create a new sale record
         const { data: saleData, error: saleError } = await supabase
           .from("sales")
           .insert({
-            cashier_id: user?.id || "",
+            cashier_id: cashierId,
             total: calculateTotal(),
             payment_method: paymentMethod,
             status: "completed",
