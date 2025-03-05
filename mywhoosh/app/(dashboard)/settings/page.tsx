@@ -286,7 +286,7 @@ export default function SettingsPage() {
     }
   }
 
-  const fileInput = useRef<HTMLInputElement>(null)
+  // Remove the duplicate fileInput reference since we already have fileInputRef
 
   if (isLoading) {
     return (
@@ -693,7 +693,7 @@ export default function SettingsPage() {
                       Restore
                     </Button>
                   </div>
-                  <input type="file" ref={fileInput} accept=".json" className="hidden" onChange={handleFileUpload} />
+                  <input type="file" ref={fileInputRef} accept=".json" className="hidden" onChange={handleFileUpload} />
                 </div>
               </div>
 

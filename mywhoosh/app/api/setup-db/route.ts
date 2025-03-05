@@ -24,12 +24,43 @@ export async function GET() {
         console.log("Creating financial_goals table")
 
         // Use Supabase SQL function if available
-        const { error: createError } = await supabaseAdmin.functions.invoke("create-tables", {
-          body: { table: "financial_goals" },
-        })
+        try {
+          // Try to create the table using SQL
+          const { error: sqlError } = await supabaseAdmin.rpc("exec_sql", {
+            sql: `
+              CREATE TABLE IF NOT EXISTS financial_goals (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                name TEXT NOT NULL,
+                target_amount DECIMAL(10, 2) NOT NULL,
+                current_amount DECIMAL(10, 2) DEFAULT 0,
+                start_date TIMESTAMPTZ NOT NULL,
+                end_date TIMESTAMPTZ NOT NULL,
+                category TEXT NOT NULL,
+                type TEXT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+              );
+            `,
+          })
 
-        if (createError) {
-          console.error("Error creating financial_goals table:", createError)
+          if (sqlError) {
+            console.error("Error creating financial_goals table via SQL:", sqlError)
+            console.log("Please run the following SQL in your Supabase SQL Editor:")
+            console.log(`
+              CREATE TABLE IF NOT EXISTS financial_goals (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                name TEXT NOT NULL,
+                target_amount DECIMAL(10, 2) NOT NULL,
+                current_amount DECIMAL(10, 2) DEFAULT 0,
+                start_date TIMESTAMPTZ NOT NULL,
+                end_date TIMESTAMPTZ NOT NULL,
+                category TEXT NOT NULL,
+                type TEXT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+              );
+            `)
+          }
+        } catch (rpcError) {
+          console.error("Error creating financial_goals table:", rpcError)
           console.log("Please run the following SQL in your Supabase SQL Editor:")
           console.log(`
             CREATE TABLE IF NOT EXISTS financial_goals (
@@ -59,22 +90,72 @@ export async function GET() {
         console.log("Creating commission_rules table")
 
         // Use Supabase SQL function if available
-        const { error: createError } = await supabaseAdmin.functions.invoke("create-tables", {
-          body: { table: "commission_rules" },
-        })
+        try {
+          // Try to create the table using SQL
+          const { error: sqlError } = await supabaseAdmin.rpc("exec_sql", {
+            sql: `
+              CREATE TABLE IF NOT EXISTS commission_rules (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                name TEXT NOT NULL,
+                percentage DECIMAL(5, 2) NOT NULL,
+                product_id TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+              );
+          
+          -- Insert default commission rules
+          INSERT INTO commission_rules (name, percentage, product_id)
+          VALUES 
+            ('Standard Commission', 5, 'all'),
+            ('Premium Products', 8, 'premium'),
+            ('Seasonal Promotion', 10, 'seasonal'),
+            ('Clearance Items', 3, 'clearance')
+          ON CONFLICT DO NOTHING;
+        `,
+          })
 
-        if (createError) {
-          console.error("Error creating commission_rules table:", createError)
+          if (sqlError) {
+            console.error("Error creating commission_rules table via SQL:", sqlError)
+            console.log("Please run the following SQL in your Supabase SQL Editor:")
+            console.log(`
+              CREATE TABLE IF NOT EXISTS commission_rules (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                name TEXT NOT NULL,
+                percentage DECIMAL(5, 2) NOT NULL,
+                product_id TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+              );
+          
+          -- Insert default commission rules
+          INSERT INTO commission_rules (name, percentage, product_id)
+          VALUES 
+            ('Standard Commission', 5, 'all'),
+            ('Premium Products', 8, 'premium'),
+            ('Seasonal Promotion', 10, 'seasonal'),
+            ('Clearance Items', 3, 'clearance')
+          ON CONFLICT DO NOTHING;
+        `)
+          }
+        } catch (rpcError) {
+          console.error("Error creating commission_rules table:", rpcError)
           console.log("Please run the following SQL in your Supabase SQL Editor:")
           console.log(`
-            CREATE TABLE IF NOT EXISTS commission_rules (
-              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-              name TEXT NOT NULL,
-              percentage DECIMAL(5, 2) NOT NULL,
-              product_id TEXT,
-              created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-          `)
+        CREATE TABLE IF NOT EXISTS commission_rules (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          name TEXT NOT NULL,
+          percentage DECIMAL(5, 2) NOT NULL,
+          product_id TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        
+        -- Insert default commission rules
+        INSERT INTO commission_rules (name, percentage, product_id)
+        VALUES 
+          ('Standard Commission', 5, 'all'),
+          ('Premium Products', 8, 'premium'),
+          ('Seasonal Promotion', 10, 'seasonal'),
+          ('Clearance Items', 3, 'clearance')
+        ON CONFLICT DO NOTHING;
+      `)
         }
       }
     } catch (error) {

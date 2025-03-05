@@ -19,8 +19,7 @@ export async function GET() {
     const tables = [
       "settings",
       "products",
-      "users",
-      "customers",
+      "profiles",
       "sales",
       "sale_items",
       "expenses",
@@ -30,10 +29,28 @@ export async function GET() {
 
     // Object to store all data
     const backupData: Record<string, any[]> = {}
+    const existingTables: string[] = []
 
     // Fetch data from each table
     for (const table of tables) {
       try {
+        // First check if the table exists by trying to get a single row
+        const { data: checkData, error: checkError } = await supabaseAdmin.from(table).select("id").limit(1)
+
+        if (checkError) {
+          if (checkError.code === "42P01") {
+            // Table doesn't exist, skip it silently
+            console.log(`Table "${table}" doesn't exist, skipping...`)
+            continue
+          } else {
+            // Other error
+            console.warn(`Error checking table ${table}:`, checkError)
+            continue
+          }
+        }
+
+        // Table exists, get all data
+        existingTables.push(table)
         const { data, error } = await supabaseAdmin.from(table).select("*")
 
         if (error) {
@@ -41,9 +58,10 @@ export async function GET() {
           backupData[table] = []
         } else {
           backupData[table] = data || []
+          console.log(`Backed up ${data?.length || 0} records from ${table}`)
         }
       } catch (error) {
-        console.warn(`Error fetching data from ${table}:`, error)
+        console.warn(`Error processing table ${table}:`, error)
         backupData[table] = []
       }
     }
@@ -53,7 +71,7 @@ export async function GET() {
       metadata: {
         version: "1.0",
         timestamp: new Date().toISOString(),
-        tables: tables,
+        tables: existingTables,
       },
       data: backupData,
     }
