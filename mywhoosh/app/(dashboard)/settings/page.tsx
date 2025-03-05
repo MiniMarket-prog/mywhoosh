@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -56,6 +56,7 @@ export default function SettingsPage() {
   const { profile } = useAuth()
   const { t, language, setLanguage, dir } = useLanguage()
   const isAdmin = profile?.role === "admin"
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Fetch settings from the API
   useEffect(() => {
@@ -204,20 +205,88 @@ export default function SettingsPage() {
   }
 
   const handleBackupDatabase = () => {
+    // Create a link to download the backup
+    const link = document.createElement("a")
+    link.href = "/api/backup"
+    link.download = `mini-market-backup-${new Date().toISOString().split("T")[0]}.json`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
     toast({
       title: "Backup initiated",
-      description: "Database backup has been initiated. You will be notified when it's complete.",
+      description: "Your backup is being downloaded.",
     })
   }
 
+  // Update the handleRestoreDatabase function
   const handleRestoreDatabase = () => {
-    if (confirm("Are you sure you want to restore the database? This will overwrite current data.")) {
-      toast({
-        title: "Restore initiated",
-        description: "Database restore has been initiated. You will be notified when it's complete.",
-      })
+    // Trigger the file input click
+    if (fileInputRef.current) {
+      fileInputRef.current.click()
     }
   }
+
+  // Add a function to handle file upload
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      setIsProcessing(true)
+
+      // Read the file
+      const reader = new FileReader()
+      reader.onload = async (e) => {
+        try {
+          const backup = JSON.parse(e.target?.result as string)
+
+          // Send the backup to the restore API
+          const response = await fetch("/api/restore", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(backup),
+          })
+
+          const result = await response.json()
+
+          if (result.success) {
+            toast({
+              title: "Restore completed",
+              description: "Your database has been restored successfully.",
+            })
+          } else {
+            toast({
+              title: "Restore failed",
+              description: result.error || "An error occurred during restore.",
+              variant: "destructive",
+            })
+          }
+        } catch (error: any) {
+          toast({
+            title: "Restore failed",
+            description: `Error parsing backup file: ${error.message}`,
+            variant: "destructive",
+          })
+        } finally {
+          setIsProcessing(false)
+        }
+      }
+
+      reader.readAsText(file)
+    } catch (error: any) {
+      toast({
+        title: "Restore failed",
+        description: `Error reading file: ${error.message}`,
+        variant: "destructive",
+      })
+      setIsProcessing(false)
+    }
+  }
+
+  const fileInput = useRef<HTMLInputElement>(null)
 
   if (isLoading) {
     return (
@@ -624,6 +693,7 @@ export default function SettingsPage() {
                       Restore
                     </Button>
                   </div>
+                  <input type="file" ref={fileInput} accept=".json" className="hidden" onChange={handleFileUpload} />
                 </div>
               </div>
 
