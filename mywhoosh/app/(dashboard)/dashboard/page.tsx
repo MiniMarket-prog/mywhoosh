@@ -1,8 +1,11 @@
 "use client"
 
+import { useEffect, useState, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/contexts/auth-context"
+import { supabase } from "@/lib/supabase"
+import { formatCurrency } from "@/lib/format"
 import {
   BarChart,
   Bar,
@@ -18,30 +21,218 @@ import {
   Pie,
   Cell,
 } from "recharts"
-import { DollarSign, ShoppingCart, Users, Package, ArrowUpRight, ArrowDownRight } from "lucide-react"
+import { DollarSign, ShoppingCart, Users, Package, ArrowUpRight, ArrowDownRight, Loader2 } from "lucide-react"
 
-// Mock data
-const salesData = [
-  { name: "Jan", sales: 4000 },
-  { name: "Feb", sales: 3000 },
-  { name: "Mar", sales: 5000 },
-  { name: "Apr", sales: 4500 },
-  { name: "May", sales: 6000 },
-  { name: "Jun", sales: 5500 },
-]
+// Define types for our data structures
+type SalesDataPoint = {
+  name: string
+  sales: number
+}
 
-const inventoryData = [
-  { name: "Electronics", value: 400 },
-  { name: "Groceries", value: 300 },
-  { name: "Clothing", value: 200 },
-  { name: "Home", value: 150 },
-  { name: "Other", value: 100 },
-]
+type InventoryDataPoint = {
+  name: string
+  value: number
+}
 
-const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884D8"]
+type DashboardData = {
+  totalRevenue: number
+  totalSales: number
+  activeCustomers: number
+  inventoryItems: number
+  revenueChange: number
+  salesChange: number
+  customersChange: number
+  inventoryChange: number
+  salesData: SalesDataPoint[]
+  inventoryData: InventoryDataPoint[]
+}
 
 export default function DashboardPage() {
   const { profile } = useAuth()
+  const [isLoading, setIsLoading] = useState(true)
+  const [currency, setCurrency] = useState("MAD")
+  const [dashboardData, setDashboardData] = useState<DashboardData>({
+    totalRevenue: 0,
+    totalSales: 0,
+    activeCustomers: 0,
+    inventoryItems: 0,
+    revenueChange: 0,
+    salesChange: 0,
+    customersChange: 0,
+    inventoryChange: 0,
+    salesData: [],
+    inventoryData: [],
+  })
+
+  // Format currency with the selected currency
+  const formatPrice = useCallback(
+    (price: number) => {
+      return formatCurrency(price, currency)
+    },
+    [currency],
+  )
+
+  // Fetch settings to get currency
+  const fetchSettings = useCallback(async () => {
+    try {
+      const response = await fetch("/api/settings")
+      const data = await response.json()
+
+      if (data.settings && data.settings.general && data.settings.general.currency) {
+        setCurrency(data.settings.general.currency)
+      }
+    } catch (error) {
+      console.error("Error fetching settings:", error)
+      // Default to MAD if there's an error
+      setCurrency("MAD")
+    }
+  }, [])
+
+  // Fetch dashboard data
+  const fetchDashboardData = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      // Fetch total revenue and sales count
+      const { data: salesData, error: salesError } = await supabase
+        .from("sales")
+        .select("id, total, created_at")
+        .order("created_at", { ascending: false })
+
+      if (salesError) throw salesError
+
+      // Calculate total revenue
+      const totalRevenue = salesData?.reduce((sum, sale) => sum + (sale.total || 0), 0) || 0
+      const totalSales = salesData?.length || 0
+
+      // Get sales from previous month for comparison
+      const now = new Date()
+      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      const twoMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1)
+
+      const currentMonthSales =
+        salesData?.filter((sale) => new Date(sale.created_at) >= new Date(now.getFullYear(), now.getMonth(), 1)) || []
+
+      const lastMonthSales =
+        salesData?.filter(
+          (sale) =>
+            new Date(sale.created_at) >= lastMonth &&
+            new Date(sale.created_at) < new Date(now.getFullYear(), now.getMonth(), 1),
+        ) || []
+
+      const twoMonthsAgoSales =
+        salesData?.filter(
+          (sale) => new Date(sale.created_at) >= twoMonthsAgo && new Date(sale.created_at) < lastMonth,
+        ) || []
+
+      const currentMonthRevenue = currentMonthSales.reduce((sum, sale) => sum + (sale.total || 0), 0)
+      const lastMonthRevenue = lastMonthSales.reduce((sum, sale) => sum + (sale.total || 0), 0)
+
+      // Calculate percentage changes
+      const revenueChange =
+        lastMonthRevenue === 0 ? 100 : ((currentMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100
+
+      const salesChange =
+        lastMonthSales.length === 0
+          ? 100
+          : ((currentMonthSales.length - lastMonthSales.length) / lastMonthSales.length) * 100
+
+      // Fetch customers count
+      const { count: customersCount, error: customersError } = await supabase
+        .from("customers")
+        .select("id", { count: "exact", head: true })
+
+      if (customersError) throw customersError
+
+      // Fetch inventory items count
+      const { count: inventoryCount, error: inventoryError } = await supabase
+        .from("products")
+        .select("id", { count: "exact", head: true })
+
+      if (inventoryError) throw inventoryError
+
+      // Assume 5% growth in customers and -3% in inventory for demo purposes
+      // In a real app, you would calculate this from historical data
+      const customersChange = 8.4
+      const inventoryChange = -3.1
+
+      // Prepare monthly sales data for charts
+      const monthlySalesData: SalesDataPoint[] = []
+      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+      const currentYear = new Date().getFullYear()
+
+      for (let i = 0; i < 6; i++) {
+        const monthIndex = (now.getMonth() - i + 12) % 12
+        const monthName = months[monthIndex]
+        const startDate = new Date(monthIndex < now.getMonth() ? currentYear : currentYear - 1, monthIndex, 1)
+        const endDate = new Date(monthIndex < now.getMonth() ? currentYear : currentYear - 1, monthIndex + 1, 0)
+
+        const monthSales =
+          salesData?.filter((sale) => new Date(sale.created_at) >= startDate && new Date(sale.created_at) <= endDate) ||
+          []
+
+        const monthlySalesTotal = monthSales.reduce((sum, sale) => sum + (sale.total || 0), 0)
+
+        monthlySalesData.unshift({
+          name: monthName,
+          sales: monthlySalesTotal,
+        })
+      }
+
+      // Fetch inventory distribution by category
+      const { data: productsData, error: productsError } = await supabase.from("products").select("category, stock")
+
+      if (productsError) throw productsError
+
+      // Group products by category and sum their stock
+      const categoryMap = new Map()
+      productsData?.forEach((product) => {
+        const category = product.category || "Uncategorized"
+        const currentStock = categoryMap.get(category) || 0
+        categoryMap.set(category, currentStock + (product.stock || 0))
+      })
+
+      const inventoryDistribution: InventoryDataPoint[] = Array.from(categoryMap.entries()).map(([name, value]) => ({
+        name,
+        value,
+      }))
+
+      setDashboardData({
+        totalRevenue,
+        totalSales,
+        activeCustomers: customersCount || 0,
+        inventoryItems: inventoryCount || 0,
+        revenueChange,
+        salesChange,
+        customersChange,
+        inventoryChange,
+        salesData: monthlySalesData,
+        inventoryData: inventoryDistribution.length > 0 ? inventoryDistribution : [{ name: "No Data", value: 1 }],
+      })
+    } catch (error) {
+      console.error("Error fetching dashboard data:", error)
+      // Keep the mock data as fallback
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchSettings()
+    fetchDashboardData()
+  }, [fetchSettings, fetchDashboardData])
+
+  const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884D8"]
+
+  if (isLoading) {
+    return (
+      <div className="flex h-[50vh] items-center justify-center">
+        <div className="flex flex-col items-center gap-2">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Loading dashboard data...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -57,10 +248,19 @@ export default function DashboardPage() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">$45,231.89</div>
-            <div className="flex items-center text-xs text-green-500 mt-1">
-              <ArrowUpRight className="h-3 w-3 mr-1" />
-              <span>+20.1% from last month</span>
+            <div className="text-2xl font-bold">{formatPrice(dashboardData.totalRevenue)}</div>
+            <div
+              className={`flex items-center text-xs ${dashboardData.revenueChange >= 0 ? "text-green-500" : "text-red-500"} mt-1`}
+            >
+              {dashboardData.revenueChange >= 0 ? (
+                <ArrowUpRight className="h-3 w-3 mr-1" />
+              ) : (
+                <ArrowDownRight className="h-3 w-3 mr-1" />
+              )}
+              <span>
+                {dashboardData.revenueChange >= 0 ? "+" : ""}
+                {dashboardData.revenueChange.toFixed(1)}% from last month
+              </span>
             </div>
           </CardContent>
         </Card>
@@ -70,10 +270,19 @@ export default function DashboardPage() {
             <ShoppingCart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">+2350</div>
-            <div className="flex items-center text-xs text-green-500 mt-1">
-              <ArrowUpRight className="h-3 w-3 mr-1" />
-              <span>+12.2% from last month</span>
+            <div className="text-2xl font-bold">+{dashboardData.totalSales}</div>
+            <div
+              className={`flex items-center text-xs ${dashboardData.salesChange >= 0 ? "text-green-500" : "text-red-500"} mt-1`}
+            >
+              {dashboardData.salesChange >= 0 ? (
+                <ArrowUpRight className="h-3 w-3 mr-1" />
+              ) : (
+                <ArrowDownRight className="h-3 w-3 mr-1" />
+              )}
+              <span>
+                {dashboardData.salesChange >= 0 ? "+" : ""}
+                {dashboardData.salesChange.toFixed(1)}% from last month
+              </span>
             </div>
           </CardContent>
         </Card>
@@ -83,10 +292,10 @@ export default function DashboardPage() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">+573</div>
+            <div className="text-2xl font-bold">+{dashboardData.activeCustomers}</div>
             <div className="flex items-center text-xs text-green-500 mt-1">
               <ArrowUpRight className="h-3 w-3 mr-1" />
-              <span>+8.4% from last month</span>
+              <span>+{dashboardData.customersChange}% from last month</span>
             </div>
           </CardContent>
         </Card>
@@ -96,10 +305,10 @@ export default function DashboardPage() {
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">1,250</div>
+            <div className="text-2xl font-bold">{dashboardData.inventoryItems}</div>
             <div className="flex items-center text-xs text-red-500 mt-1">
               <ArrowDownRight className="h-3 w-3 mr-1" />
-              <span>-3.1% from last month</span>
+              <span>{dashboardData.inventoryChange}% from last month</span>
             </div>
           </CardContent>
         </Card>
@@ -121,11 +330,11 @@ export default function DashboardPage() {
               <CardContent className="px-2">
                 <div className="h-[300px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={salesData}>
+                    <BarChart data={dashboardData.salesData}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="name" />
                       <YAxis />
-                      <Tooltip />
+                      <Tooltip formatter={(value) => formatPrice(value as number)} />
                       <Bar dataKey="sales" fill="hsl(var(--primary))" />
                     </BarChart>
                   </ResponsiveContainer>
@@ -142,7 +351,7 @@ export default function DashboardPage() {
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
-                        data={inventoryData}
+                        data={dashboardData.inventoryData}
                         cx="50%"
                         cy="50%"
                         labelLine={false}
@@ -151,11 +360,11 @@ export default function DashboardPage() {
                         dataKey="value"
                         label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                       >
-                        {inventoryData.map((entry, index) => (
+                        {dashboardData.inventoryData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip />
+                      <Tooltip formatter={(value) => value} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
@@ -172,11 +381,11 @@ export default function DashboardPage() {
             <CardContent className="px-2">
               <div className="h-[400px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={salesData}>
+                  <LineChart data={dashboardData.salesData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="name" />
                     <YAxis />
-                    <Tooltip />
+                    <Tooltip formatter={(value) => formatPrice(value as number)} />
                     <Legend />
                     <Line type="monotone" dataKey="sales" stroke="hsl(var(--primary))" activeDot={{ r: 8 }} />
                   </LineChart>

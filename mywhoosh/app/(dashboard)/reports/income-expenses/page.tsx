@@ -28,7 +28,7 @@ type FinanceDataPoint = {
 
 type TimeframeType = "daily" | "weekly" | "monthly"
 
-export default function FinancePage() {
+export default function IncomeExpensesPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [timeframe, setTimeframe] = useState<TimeframeType>("monthly")
   const [currency, setCurrency] = useState("MAD")
@@ -338,8 +338,8 @@ export default function FinancePage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col">
-        <h1 className="text-2xl font-bold">Financial Reports</h1>
-        <p className="text-muted-foreground">Track your income, expenses, and profit over time</p>
+        <h1 className="text-2xl font-bold">Income vs Expenses</h1>
+        <p className="text-muted-foreground">Track your income and expenses over time</p>
       </div>
 
       <Tabs defaultValue="monthly" onValueChange={(value) => setTimeframe(value as TimeframeType)} value={timeframe}>

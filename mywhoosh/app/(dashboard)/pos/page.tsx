@@ -35,6 +35,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { formatCurrency } from "@/lib/format"
 
 type Product = {
   id: string
@@ -86,6 +87,15 @@ export default function POSPage() {
   const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false)
   const [continuedSaleId, setContinuedSaleId] = useState<string | null>(null)
   const [isContinuedSaleAlertOpen, setIsContinuedSaleAlertOpen] = useState(false)
+  const [currency, setCurrency] = useState("MAD")
+
+  // Format price with Moroccan Dirham
+  const formatPrice = useCallback(
+    (price: number) => {
+      return formatCurrency(price, currency)
+    },
+    [currency],
+  )
 
   const fetchProducts = useCallback(async () => {
     setIsLoading(true)
@@ -136,6 +146,21 @@ export default function POSPage() {
     }
   }, [])
 
+  const fetchSettings = useCallback(async () => {
+    try {
+      const response = await fetch("/api/settings")
+      const data = await response.json()
+
+      if (data.settings && data.settings.general && data.settings.general.currency) {
+        setCurrency(data.settings.general.currency)
+      }
+    } catch (error) {
+      console.error("Error fetching settings:", error)
+      // Default to MAD if there's an error
+      setCurrency("MAD")
+    }
+  }, [])
+
   // Check for continued sale data in localStorage
   useEffect(() => {
     const continueSaleData = localStorage.getItem("continue_sale")
@@ -173,12 +198,13 @@ export default function POSPage() {
   useEffect(() => {
     fetchProducts()
     fetchRecentProducts()
+    fetchSettings()
 
     // Focus the barcode input on page load
     if (barcodeInputRef.current) {
       barcodeInputRef.current.focus()
     }
-  }, [fetchProducts, fetchRecentProducts])
+  }, [fetchProducts, fetchRecentProducts, fetchSettings])
 
   useEffect(() => {
     if (searchTerm) {
@@ -349,7 +375,7 @@ export default function POSPage() {
 
         toast({
           title: "Sale updated",
-          description: `Total: $${calculateTotal().toFixed(2)}`,
+          description: `Total: ${formatPrice(calculateTotal())}`,
         })
 
         setLastCompletedSale({
@@ -418,7 +444,7 @@ export default function POSPage() {
 
         toast({
           title: "Sale completed",
-          description: `Total: $${calculateTotal().toFixed(2)}`,
+          description: `Total: ${formatPrice(calculateTotal())}`,
         })
 
         setLastCompletedSale({
@@ -453,7 +479,17 @@ export default function POSPage() {
     } finally {
       setIsProcessing(false)
     }
-  }, [cart, paymentMethod, toast, user?.id, calculateTotal, fetchProducts, fetchRecentProducts, continuedSaleId])
+  }, [
+    cart,
+    paymentMethod,
+    toast,
+    user?.id,
+    calculateTotal,
+    fetchProducts,
+    fetchRecentProducts,
+    continuedSaleId,
+    formatPrice,
+  ])
 
   const handleQuickAction = (amount: number) => {
     setAmountReceived(amount.toString())
@@ -673,7 +709,7 @@ export default function POSPage() {
                   onClick={() => addToCart(product)}
                 >
                   <span className="font-medium truncate w-full">{product.name}</span>
-                  <span className="text-xs text-muted-foreground">${product.price.toFixed(2)}</span>
+                  <span className="text-xs text-muted-foreground">{formatPrice(product.price)}</span>
                 </Button>
               ))}
             </div>
@@ -699,7 +735,7 @@ export default function POSPage() {
                 </CardHeader>
                 <CardContent className="p-4 pt-0 pb-2">
                   <p className="text-xs text-muted-foreground mb-1">Stock: {product.stock}</p>
-                  <p className="font-medium">${product.price.toFixed(2)}</p>
+                  <p className="font-medium">{formatPrice(product.price)}</p>
                 </CardContent>
                 <CardFooter className="p-2">
                   <Button className="w-full" size="sm" onClick={() => addToCart(product)}>
@@ -746,7 +782,7 @@ export default function POSPage() {
                   <div key={item.product.id} className="flex items-center justify-between">
                     <div className="flex-1">
                       <p className="font-medium">{item.product.name}</p>
-                      <p className="text-sm text-muted-foreground">${item.product.price.toFixed(2)} each</p>
+                      <p className="text-sm text-muted-foreground">{formatPrice(item.product.price)} each</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <Button
@@ -783,11 +819,11 @@ export default function POSPage() {
                 <div className="space-y-2">
                   <div className="flex justify-between">
                     <span>Subtotal</span>
-                    <span>${calculateTotal().toFixed(2)}</span>
+                    <span>{formatPrice(calculateTotal())}</span>
                   </div>
                   <div className="flex justify-between font-bold">
                     <span>Total</span>
-                    <span>${calculateTotal().toFixed(2)}</span>
+                    <span>{formatPrice(calculateTotal())}</span>
                   </div>
                 </div>
 
@@ -836,7 +872,7 @@ export default function POSPage() {
                 <Label htmlFor="total-amount">Total Amount</Label>
                 <div className="flex items-center mt-1 border rounded-md p-2 bg-muted">
                   <DollarSign className="h-4 w-4 text-muted-foreground mr-1" />
-                  <span>{calculateTotal().toFixed(2)}</span>
+                  <span>{formatPrice(calculateTotal())}</span>
                 </div>
               </div>
               <div>
@@ -860,7 +896,7 @@ export default function POSPage() {
             <div className="flex flex-wrap gap-2 mt-2">
               {quickAmounts.map((amount) => (
                 <Button key={amount} variant="outline" size="sm" onClick={() => handleQuickAction(amount)}>
-                  ${amount}
+                  {formatCurrency(amount, currency)}
                 </Button>
               ))}
               <Button variant="outline" size="sm" onClick={() => handleQuickAction(calculateTotal())}>
@@ -872,7 +908,7 @@ export default function POSPage() {
 
             <div className="flex justify-between items-center">
               <span className="text-lg font-medium">Change Due:</span>
-              <span className="text-2xl font-bold">${calculateChange().toFixed(2)}</span>
+              <span className="text-2xl font-bold">{formatPrice(calculateChange())}</span>
             </div>
           </div>
           <DialogFooter>
@@ -904,7 +940,7 @@ export default function POSPage() {
                       <span>{item.quantity} x </span>
                       <span>{item.product.name}</span>
                     </div>
-                    <span>${item.subtotal.toFixed(2)}</span>
+                    <span>{formatPrice(item.subtotal)}</span>
                   </div>
                 ))}
               </div>
@@ -913,7 +949,7 @@ export default function POSPage() {
 
               <div className="flex justify-between font-medium">
                 <span>Total</span>
-                <span>${lastCompletedSale.total.toFixed(2)}</span>
+                <span>{formatPrice(lastCompletedSale.total)}</span>
               </div>
 
               <div className="text-sm text-muted-foreground">
