@@ -24,6 +24,8 @@ import {
   Receipt,
   RotateCcw,
   AlertCircle,
+  AlertTriangle,
+  Save,
 } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import {
@@ -36,6 +38,10 @@ import {
 } from "@/components/ui/dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { formatCurrency } from "@/lib/format"
+import { Badge } from "@/components/ui/badge"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { useLanguage } from "@/contexts/language-context"
+import { Sheet, SheetContent } from "@/components/ui/sheet"
 
 type Product = {
   id: string
@@ -43,6 +49,7 @@ type Product = {
   barcode: string
   price: number
   stock: number
+  min_stock: number
   category: string
 }
 
@@ -60,6 +67,10 @@ type ContinueSaleData = {
     subtotal: number
   }[]
   payment_method: string
+}
+
+type LowStockProduct = Product & {
+  newStock?: number
 }
 
 export default function POSPage() {
@@ -88,6 +99,13 @@ export default function POSPage() {
   const [continuedSaleId, setContinuedSaleId] = useState<string | null>(null)
   const [isContinuedSaleAlertOpen, setIsContinuedSaleAlertOpen] = useState(false)
   const [currency, setCurrency] = useState("MAD")
+  const { t } = useLanguage()
+
+  // New state for low stock products
+  const [lowStockProducts, setLowStockProducts] = useState<LowStockProduct[]>([])
+  const [isLowStockDialogOpen, setIsLowStockDialogOpen] = useState(false)
+  const [isUpdatingStock, setIsUpdatingStock] = useState(false)
+  const [isCartOpen, setIsCartOpen] = useState(false)
 
   // Format price with Moroccan Dirham
   const formatPrice = useCallback(
@@ -129,6 +147,53 @@ export default function POSPage() {
       setIsLoading(false)
     }
   }, [toast])
+
+  // New function to fetch low stock products
+  const fetchLowStockProducts = useCallback(async () => {
+    try {
+      // Using a more compatible query format that doesn't rely on supabase.raw
+      const { data, error } = await supabase
+        .from("products")
+        .select("*")
+        .lt("stock", supabase.rpc("get_min_stock_for_product", {}))
+        .order("name")
+
+      if (error) {
+        console.error("Error fetching low stock products:", error)
+
+        // Let's try a fallback approach if the RPC isn't available
+        console.log("Trying fallback query for low stock products")
+        const { data: fallbackData, error: fallbackError } = await supabase.from("products").select("*").order("name")
+
+        if (fallbackError) {
+          console.error("Fallback query error:", fallbackError)
+          throw fallbackError
+        }
+
+        // Filter the products manually in JavaScript
+        const lowStock = fallbackData?.filter((product) => product.stock < product.min_stock) || []
+        console.log("Low stock products (fallback):", lowStock)
+        setLowStockProducts(lowStock)
+        return
+      }
+
+      console.log("Low stock products found:", data) // Debug log
+      setLowStockProducts(data || [])
+    } catch (error) {
+      console.error("Error fetching low stock products:", error)
+
+      // As a last resort, try to get all products and filter client-side
+      try {
+        const { data } = await supabase.from("products").select("*")
+        const lowStock = data?.filter((product) => product.stock < product.min_stock) || []
+        console.log("Low stock products (client-side):", lowStock)
+        setLowStockProducts(lowStock)
+      } catch (err) {
+        console.error("Failed to fetch products for client-side filtering:", err)
+        setLowStockProducts([]) // Reset to empty array on error
+      }
+    }
+  }, [])
 
   const fetchRecentProducts = useCallback(async () => {
     try {
@@ -257,12 +322,27 @@ export default function POSPage() {
     fetchProducts()
     fetchRecentProducts()
     fetchSettings()
+    fetchLowStockProducts() // Fetch low stock products on initial load
+
+    // Add this debug log
+    console.log("Fetching low stock products")
 
     // Focus the barcode input on page load
     if (barcodeInputRef.current) {
       barcodeInputRef.current.focus()
     }
-  }, [fetchProducts, fetchRecentProducts, fetchSettings])
+  }, [fetchProducts, fetchRecentProducts, fetchSettings, fetchLowStockProducts])
+
+  // Add this after your other useEffect hooks
+  useEffect(() => {
+    // Initial fetch
+    fetchLowStockProducts()
+
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchLowStockProducts, 30000)
+
+    return () => clearInterval(interval)
+  }, [fetchLowStockProducts])
 
   useEffect(() => {
     if (searchTerm) {
@@ -565,6 +645,7 @@ export default function POSPage() {
       // Refresh products and recent products
       fetchProducts()
       fetchRecentProducts()
+      fetchLowStockProducts() // Refresh low stock products after sale
 
       // Focus back on barcode input
       if (barcodeInputRef.current) {
@@ -589,9 +670,56 @@ export default function POSPage() {
     calculateTotal,
     fetchProducts,
     fetchRecentProducts,
+    fetchLowStockProducts,
     continuedSaleId,
     formatPrice,
   ])
+
+  // New function to handle stock updates for low stock products
+  const handleUpdateStock = async () => {
+    setIsUpdatingStock(true)
+    try {
+      // Filter products that have been updated
+      const productsToUpdate = lowStockProducts.filter(
+        (product) => product.newStock !== undefined && product.newStock !== product.stock,
+      )
+
+      if (productsToUpdate.length === 0) {
+        toast({
+          title: "No changes",
+          description: "No stock changes were made",
+        })
+        setIsLowStockDialogOpen(false)
+        return
+      }
+
+      // Update each product's stock
+      for (const product of productsToUpdate) {
+        const { error } = await supabase.from("products").update({ stock: product.newStock }).eq("id", product.id)
+
+        if (error) throw error
+      }
+
+      toast({
+        title: "Stock updated",
+        description: `Updated stock for ${productsToUpdate.length} products`,
+      })
+
+      // Refresh products and low stock products
+      fetchProducts()
+      fetchLowStockProducts()
+      setIsLowStockDialogOpen(false)
+    } catch (error) {
+      console.error("Error updating stock:", error)
+      toast({
+        title: "Error",
+        description: "Failed to update stock",
+        variant: "destructive",
+      })
+    } finally {
+      setIsUpdatingStock(false)
+    }
+  }
 
   const handleQuickAction = (amount: number) => {
     setAmountReceived(amount.toString())
@@ -693,6 +821,17 @@ export default function POSPage() {
     }
   }
 
+  // Handle stock input change for low stock products
+  const handleStockInputChange = (productId: string, value: string) => {
+    const newValue = Number.parseInt(value, 10)
+
+    if (isNaN(newValue) || newValue < 0) return
+
+    setLowStockProducts((prev) =>
+      prev.map((product) => (product.id === productId ? { ...product, newStock: newValue } : product)),
+    )
+  }
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // F2 to focus barcode input
@@ -749,7 +888,7 @@ export default function POSPage() {
       )}
 
       <div className="lg:w-2/3 space-y-6">
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button
             variant="outline"
             size="sm"
@@ -757,7 +896,8 @@ export default function POSPage() {
             className="flex items-center gap-1"
           >
             <Calculator className="h-4 w-4" />
-            <span>Change Calculator (F3)</span>
+            <span className="hidden sm:inline">Change Calculator</span>
+            <span className="sm:hidden">Calc</span>
           </Button>
           <Button
             variant="outline"
@@ -767,7 +907,8 @@ export default function POSPage() {
             className="flex items-center gap-1"
           >
             <RotateCcw className="h-4 w-4" />
-            <span>Void Last Item (F5)</span>
+            <span className="hidden sm:inline">Void Last Item</span>
+            <span className="sm:hidden">Void</span>
           </Button>
           <Button
             variant="outline"
@@ -777,7 +918,30 @@ export default function POSPage() {
             className="flex items-center gap-1"
           >
             <Receipt className="h-4 w-4" />
-            <span>Repeat Last Sale (F6)</span>
+            <span className="hidden sm:inline">Repeat Last Sale</span>
+            <span className="sm:hidden">Repeat</span>
+          </Button>
+
+          {/* New Low Stock Alert Button */}
+          <Button
+            variant={lowStockProducts.length > 0 ? "destructive" : "outline"}
+            size="sm"
+            onClick={() => setIsLowStockDialogOpen(true)}
+            className="flex items-center gap-1 ml-auto relative"
+          >
+            <AlertTriangle className="h-4 w-4" />
+            <span className="hidden sm:inline">Low Stock</span>
+            {lowStockProducts.length > 0 && (
+              <Badge variant="outline" className="ml-1 bg-background text-foreground">
+                {lowStockProducts.length}
+              </Badge>
+            )}
+            {lowStockProducts.length > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+              </span>
+            )}
           </Button>
         </div>
 
@@ -818,7 +982,8 @@ export default function POSPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        {/* Update the product grid to be more responsive */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {isLoading ? (
             Array.from({ length: 8 }).map((_, i) => (
               <Card key={i} className="animate-pulse">
@@ -836,7 +1001,14 @@ export default function POSPage() {
                   <CardTitle className="text-sm truncate">{product.name}</CardTitle>
                 </CardHeader>
                 <CardContent className="p-4 pt-0 pb-2">
-                  <p className="text-xs text-muted-foreground mb-1">Stock: {product.stock}</p>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    Stock: {product.stock}
+                    {product.stock <= product.min_stock && (
+                      <Badge variant="destructive" className="ml-2 text-[10px]">
+                        Low
+                      </Badge>
+                    )}
+                  </p>
                   <p className="font-medium">{formatPrice(product.price)}</p>
                 </CardContent>
                 <CardFooter className="p-2">
@@ -856,111 +1028,237 @@ export default function POSPage() {
         </div>
       </div>
 
+      {/* Cart section - make it fixed on mobile */}
       <div className="lg:w-1/3">
-        <Card className="sticky top-4">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>{continuedSaleId ? "Continuing Sale" : "Shopping Cart"}</span>
+        <div className="lg:sticky lg:top-4">
+          {/* Mobile cart toggle button - only visible on small screens */}
+          <div className="fixed bottom-4 right-4 lg:hidden z-10">
+            <Button onClick={() => setIsCartOpen(!isCartOpen)} size="lg" className="rounded-full h-14 w-14 shadow-lg">
+              <ShoppingCart className="h-6 w-6" />
               {cart.length > 0 && (
-                <Button variant="ghost" size="icon" onClick={() => setCart([])}>
-                  <X className="h-4 w-4" />
+                <span className="absolute -top-2 -right-2 bg-primary text-primary-foreground rounded-full h-6 w-6 flex items-center justify-center text-xs">
+                  {cart.length}
+                </span>
+              )}
+            </Button>
+          </div>
+
+          {/* Mobile cart sheet */}
+          <Sheet open={isCartOpen} onOpenChange={setIsCartOpen}>
+            <SheetContent side="bottom" className="h-[80vh] p-0 sm:max-w-none">
+              <div className="h-full flex flex-col">
+                <div className="p-4 border-b">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-semibold">Shopping Cart</h2>
+                    {cart.length > 0 && (
+                      <Button variant="ghost" size="sm" onClick={() => setCart([])}>
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <div className="flex-1 overflow-auto p-4">
+                  {/* Cart items */}
+                  {cart.length === 0 ? (
+                    <div className="text-center py-8">
+                      <ShoppingCart className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                      <h3 className="text-lg font-medium">Your cart is empty</h3>
+                      <p className="text-muted-foreground">Scan products to begin checkout</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {cart.map((item) => (
+                        <div key={item.product.id} className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <p className="font-medium">{item.product.name}</p>
+                            <p className="text-sm text-muted-foreground">{formatPrice(item.product.price)} each</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => updateQuantity(item.product.id, item.quantity - 1)}
+                            >
+                              <Minus className="h-3 w-3" />
+                            </Button>
+                            <span className="w-8 text-center">{item.quantity}</span>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => updateQuantity(item.product.id, item.quantity + 1)}
+                            >
+                              <Plus className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive"
+                              onClick={() => removeFromCart(item.product.id)}
+                            >
+                              <Trash className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="p-4 border-t">
+                  <div className="space-y-2 mb-4">
+                    <div className="flex justify-between">
+                      <span>Subtotal</span>
+                      <span>{formatPrice(calculateTotal())}</span>
+                    </div>
+                    <div className="flex justify-between font-bold">
+                      <span>Total</span>
+                      <span>{formatPrice(calculateTotal())}</span>
+                    </div>
+                  </div>
+                  <div className="space-y-2 mb-4">
+                    <Label htmlFor="mobile-payment-method">Payment Method</Label>
+                    <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                      <SelectTrigger id="mobile-payment-method">
+                        <SelectValue placeholder="Select payment method" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cash">Cash</SelectItem>
+                        <SelectItem value="card">Card</SelectItem>
+                        <SelectItem value="mobile">Mobile Payment</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    className="w-full"
+                    size="lg"
+                    disabled={cart.length === 0 || isProcessing}
+                    onClick={() => {
+                      handleCheckout()
+                      setIsCartOpen(false)
+                    }}
+                  >
+                    {isProcessing ? "Processing..." : continuedSaleId ? "Update Sale" : "Checkout"}
+                  </Button>
+                </div>
+              </div>
+            </SheetContent>
+          </Sheet>
+
+          {/* Desktop cart - only visible on large screens */}
+          <Card className="hidden lg:block">
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <span>{continuedSaleId ? "Continuing Sale" : "Shopping Cart"}</span>
+                {cart.length > 0 && (
+                  <Button variant="ghost" size="icon" onClick={() => setCart([])}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {cart.length === 0 ? (
+                <div className="text-center py-8">
+                  <ShoppingCart className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-medium">Your cart is empty</h3>
+                  <p />
+                  <h3 className="text-lg font-medium">Your cart is empty</h3>
+                  <p className="text-muted-foreground">Scan products to begin checkout</p>
+                  <p className="text-xs text-muted-foreground mt-4">
+                    Press <kbd className="px-1 py-0.5 bg-muted rounded">F2</kbd> to focus scanner
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {cart.map((item) => (
+                    <div key={item.product.id} className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <p className="font-medium">{item.product.name}</p>
+                        <p className="text-sm text-muted-foreground">{formatPrice(item.product.price)} each</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => updateQuantity(item.product.id, item.quantity - 1)}
+                        >
+                          <Minus className="h-3 w-3" />
+                        </Button>
+                        <span className="w-8 text-center">{item.quantity}</span>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => updateQuantity(item.product.id, item.quantity + 1)}
+                        >
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive"
+                          onClick={() => removeFromCart(item.product.id)}
+                        >
+                          <Trash className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+
+                  <Separator className="my-4" />
+
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span>Subtotal</span>
+                      <span>{formatPrice(calculateTotal())}</span>
+                    </div>
+                    <div className="flex justify-between font-bold">
+                      <span>Total</span>
+                      <span>{formatPrice(calculateTotal())}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 pt-4">
+                    <Label htmlFor="payment-method">Payment Method</Label>
+                    <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                      <SelectTrigger id="payment-method">
+                        <SelectValue placeholder="Select payment method" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cash">Cash</SelectItem>
+                        <SelectItem value="card">Card</SelectItem>
+                        <SelectItem value="mobile">Mobile Payment</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+            <CardFooter className="flex flex-col gap-2">
+              <Button
+                className="w-full"
+                size="lg"
+                disabled={cart.length === 0 || isProcessing}
+                onClick={handleCheckout}
+              >
+                {isProcessing ? "Processing..." : continuedSaleId ? "Update Sale (F4)" : "Checkout (F4)"}
+              </Button>
+              {lastCompletedSale && (
+                <Button variant="outline" className="w-full" size="sm" onClick={() => setIsReceiptDialogOpen(true)}>
+                  <Receipt className="mr-2 h-4 w-4" />
+                  View Last Receipt
                 </Button>
               )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {cart.length === 0 ? (
-              <div className="text-center py-8">
-                <ShoppingCart className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                <h3 className="text-lg font-medium">Your cart is empty</h3>
-                <p className="text-muted-foreground">Scan products to begin checkout</p>
-                <p className="text-xs text-muted-foreground mt-4">
-                  Press <kbd className="px-1 py-0.5 bg-muted rounded">F2</kbd> to focus scanner
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {cart.map((item) => (
-                  <div key={item.product.id} className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <p className="font-medium">{item.product.name}</p>
-                      <p className="text-sm text-muted-foreground">{formatPrice(item.product.price)} each</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => updateQuantity(item.product.id, item.quantity - 1)}
-                      >
-                        <Minus className="h-3 w-3" />
-                      </Button>
-                      <span className="w-8 text-center">{item.quantity}</span>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => updateQuantity(item.product.id, item.quantity + 1)}
-                      >
-                        <Plus className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive"
-                        onClick={() => removeFromCart(item.product.id)}
-                      >
-                        <Trash className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-
-                <Separator className="my-4" />
-
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span>Subtotal</span>
-                    <span>{formatPrice(calculateTotal())}</span>
-                  </div>
-                  <div className="flex justify-between font-bold">
-                    <span>Total</span>
-                    <span>{formatPrice(calculateTotal())}</span>
-                  </div>
-                </div>
-
-                <div className="space-y-2 pt-4">
-                  <Label htmlFor="payment-method">Payment Method</Label>
-                  <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                    <SelectTrigger id="payment-method">
-                      <SelectValue placeholder="Select payment method" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="cash">Cash</SelectItem>
-                      <SelectItem value="card">Card</SelectItem>
-                      <SelectItem value="mobile">Mobile Payment</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
-          </CardContent>
-          <CardFooter className="flex flex-col gap-2">
-            <Button className="w-full" size="lg" disabled={cart.length === 0 || isProcessing} onClick={handleCheckout}>
-              {isProcessing ? "Processing..." : continuedSaleId ? "Update Sale (F4)" : "Checkout (F4)"}
-            </Button>
-            {lastCompletedSale && (
-              <Button variant="outline" className="w-full" size="sm" onClick={() => setIsReceiptDialogOpen(true)}>
-                <Receipt className="mr-2 h-4 w-4" />
-                View Last Receipt
-              </Button>
-            )}
-            <p className="text-xs text-muted-foreground text-center">
-              Scan products with barcode scanner or search by name
-            </p>
-          </CardFooter>
-        </Card>
+              <p className="text-xs text-muted-foreground text-center">
+                Scan products with barcode scanner or search by name
+              </p>
+            </CardFooter>
+          </Card>
+        </div>
       </div>
+
       {/* Change Calculator Dialog */}
       <Dialog open={isChangeCalculatorOpen} onOpenChange={setIsChangeCalculatorOpen}>
         <DialogContent className="sm:max-w-md">
@@ -1069,6 +1367,104 @@ export default function POSPage() {
             <Button variant="outline" onClick={() => window.print()}>
               Print
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Low Stock Products Dialog */}
+      <Dialog open={isLowStockDialogOpen} onOpenChange={setIsLowStockDialogOpen}>
+        <DialogContent className="sm:max-w-[800px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Low Stock Products
+            </DialogTitle>
+            <DialogDescription>
+              {lowStockProducts.length > 0
+                ? "The following products are below their minimum stock level. Adjust stock quantities as needed."
+                : "All products are above their minimum stock levels."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {lowStockProducts.length > 0 ? (
+            <div className="max-h-[60vh] overflow-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Product</TableHead>
+                    <TableHead>Current Stock</TableHead>
+                    <TableHead>Min Stock</TableHead>
+                    <TableHead>New Stock</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {lowStockProducts.map((product) => (
+                    <TableRow key={product.id}>
+                      <TableCell className="font-medium">{product.name}</TableCell>
+                      <TableCell className="text-destructive">{product.stock}</TableCell>
+                      <TableCell>{product.min_stock}</TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={product.newStock !== undefined ? product.newStock : product.stock}
+                          onChange={(e) => handleStockInputChange(product.id, e.target.value)}
+                          className="w-24"
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="py-8 text-center">
+              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-100">
+                <svg className="h-10 w-10 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h3 className="mt-4 text-lg font-medium">All products have sufficient stock</h3>
+              <p className="mt-2 text-sm text-muted-foreground">
+                There are no products below their minimum stock level.
+              </p>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsLowStockDialogOpen(false)}>
+              Cancel
+            </Button>
+            {lowStockProducts.length > 0 && (
+              <Button onClick={handleUpdateStock} disabled={isUpdatingStock}>
+                {isUpdatingStock ? (
+                  <>
+                    <svg className="mr-2 h-4 w-4 animate-spin" viewBox="0 0 24 24">
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                        fill="none"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                    Updating...
+                  </>
+                ) : (
+                  <>
+                    <Save className="mr-2 h-4 w-4" />
+                    Update Stock
+                  </>
+                )}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

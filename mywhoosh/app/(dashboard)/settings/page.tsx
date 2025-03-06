@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -56,6 +56,7 @@ export default function SettingsPage() {
   const { profile } = useAuth()
   const { t, language, setLanguage, dir } = useLanguage()
   const isAdmin = profile?.role === "admin"
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Fetch settings from the API
   useEffect(() => {
@@ -204,20 +205,88 @@ export default function SettingsPage() {
   }
 
   const handleBackupDatabase = () => {
+    // Create a link to download the backup
+    const link = document.createElement("a")
+    link.href = "/api/backup"
+    link.download = `mini-market-backup-${new Date().toISOString().split("T")[0]}.json`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
     toast({
       title: "Backup initiated",
-      description: "Database backup has been initiated. You will be notified when it's complete.",
+      description: "Your backup is being downloaded.",
     })
   }
 
+  // Update the handleRestoreDatabase function
   const handleRestoreDatabase = () => {
-    if (confirm("Are you sure you want to restore the database? This will overwrite current data.")) {
-      toast({
-        title: "Restore initiated",
-        description: "Database restore has been initiated. You will be notified when it's complete.",
-      })
+    // Trigger the file input click
+    if (fileInputRef.current) {
+      fileInputRef.current.click()
     }
   }
+
+  // Add a function to handle file upload
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      setIsProcessing(true)
+
+      // Read the file
+      const reader = new FileReader()
+      reader.onload = async (e) => {
+        try {
+          const backup = JSON.parse(e.target?.result as string)
+
+          // Send the backup to the restore API
+          const response = await fetch("/api/restore", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(backup),
+          })
+
+          const result = await response.json()
+
+          if (result.success) {
+            toast({
+              title: "Restore completed",
+              description: "Your database has been restored successfully.",
+            })
+          } else {
+            toast({
+              title: "Restore failed",
+              description: result.error || "An error occurred during restore.",
+              variant: "destructive",
+            })
+          }
+        } catch (error: any) {
+          toast({
+            title: "Restore failed",
+            description: `Error parsing backup file: ${error.message}`,
+            variant: "destructive",
+          })
+        } finally {
+          setIsProcessing(false)
+        }
+      }
+
+      reader.readAsText(file)
+    } catch (error: any) {
+      toast({
+        title: "Restore failed",
+        description: `Error reading file: ${error.message}`,
+        variant: "destructive",
+      })
+      setIsProcessing(false)
+    }
+  }
+
+  // Remove the duplicate fileInput reference since we already have fileInputRef
 
   if (isLoading) {
     return (
@@ -234,8 +303,8 @@ export default function SettingsPage() {
     <div className="space-y-6" dir={dir}>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">{t("settings.title")}</h1>
-          <p className="text-muted-foreground">{t("settings.subtitle")}</p>
+          <h1 className="text-3xl font-bold tracking-tight">{t("settings")}</h1>
+          <p className="text-muted-foreground">{t("settings")}</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleResetSettings} disabled={isProcessing}>
@@ -262,23 +331,23 @@ export default function SettingsPage() {
         <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="general">
             <Building className="mr-2 h-4 w-4" />
-            {t("settings.tab.general")}
+            {t("general")}
           </TabsTrigger>
           <TabsTrigger value="receipt">
             <Receipt className="mr-2 h-4 w-4" />
-            {t("settings.tab.receipt")}
+            {t("receipt")}
           </TabsTrigger>
           <TabsTrigger value="tax">
             <Percent className="mr-2 h-4 w-4" />
-            {t("settings.tab.tax")}
+            {t("tax")}
           </TabsTrigger>
           <TabsTrigger value="preferences">
             <User className="mr-2 h-4 w-4" />
-            {t("settings.tab.preferences")}
+            {t("preferences")}
           </TabsTrigger>
           <TabsTrigger value="backup" disabled={!isAdmin}>
             <Database className="mr-2 h-4 w-4" />
-            {t("settings.tab.backup")}
+            {t("backup")}
           </TabsTrigger>
         </TabsList>
 
@@ -286,13 +355,13 @@ export default function SettingsPage() {
         <TabsContent value="general">
           <Card>
             <CardHeader>
-              <CardTitle>{t("settings.general.title")}</CardTitle>
-              <CardDescription>{t("settings.general.description")}</CardDescription>
+              <CardTitle>{t("title")}</CardTitle>
+              <CardDescription>{t("description")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="storeName">{t("settings.general.storeName")}</Label>
+                  <Label htmlFor="storeName">{t("storeName")}</Label>
                   <Input
                     id="storeName"
                     name="storeName"
@@ -301,7 +370,7 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="currency">{t("settings.general.currency")}</Label>
+                  <Label htmlFor="currency">{t("currency")}</Label>
                   <Select
                     value={settings.general.currency}
                     onValueChange={(value) => {
@@ -329,7 +398,7 @@ export default function SettingsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="address">{t("settings.general.address")}</Label>
+                <Label htmlFor="address">{t("address")}</Label>
                 <Textarea
                   id="address"
                   name="address"
@@ -341,11 +410,11 @@ export default function SettingsPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="phone">{t("settings.general.phone")}</Label>
+                  <Label htmlFor="phone">{t("phone")}</Label>
                   <Input id="phone" name="phone" value={settings.general.phone} onChange={handleGeneralChange} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="email">{t("settings.general.email")}</Label>
+                  <Label htmlFor="email">{t("email")}</Label>
                   <Input id="email" name="email" value={settings.general.email} onChange={handleGeneralChange} />
                 </div>
               </div>
@@ -536,18 +605,18 @@ export default function SettingsPage() {
                       <SelectItem value="en">
                         <div className="flex items-center">
                           <Globe className="mr-2 h-4 w-4" />
-                          {t("language.english")}
+                          {t("english")}
                         </div>
                       </SelectItem>
                       <SelectItem value="ar">
                         <div className="flex items-center">
                           <Globe className="mr-2 h-4 w-4" />
-                          {t("language.arabic")}
+                          {t("arabic")}
                         </div>
                       </SelectItem>
-                      <SelectItem value="es">{t("language.spanish")}</SelectItem>
-                      <SelectItem value="fr">{t("language.french")}</SelectItem>
-                      <SelectItem value="de">{t("language.german")}</SelectItem>
+                      <SelectItem value="es">{t("spanish")}</SelectItem>
+                      <SelectItem value="fr">{t("french")}</SelectItem>
+                      <SelectItem value="de">{t("german")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -624,6 +693,7 @@ export default function SettingsPage() {
                       Restore
                     </Button>
                   </div>
+                  <input type="file" ref={fileInputRef} accept=".json" className="hidden" onChange={handleFileUpload} />
                 </div>
               </div>
 

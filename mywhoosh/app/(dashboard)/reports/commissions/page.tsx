@@ -68,7 +68,7 @@ export default function CommissionsPage() {
         .select("*")
         .order("created_at", { ascending: false })
 
-      if (rulesError) {
+      if (rulesError && rulesError.code !== "42P01") {
         console.error("Error fetching commission rules:", rulesError)
         throw rulesError
       }
@@ -77,48 +77,94 @@ export default function CommissionsPage() {
       if (rulesData && rulesData.length > 0) {
         setCommissionRules(rulesData)
       } else {
-        // Otherwise, keep using mock data
-        setCommissionRules([
+        console.log("No commission rules found, creating default rules")
+        // Create default commission rules in the database
+        const defaultRules = [
           {
-            id: "1",
             name: "Standard Commission",
             percentage: 5,
             product_id: "all",
-            created_at: "2023-01-01T00:00:00Z",
           },
           {
-            id: "2",
             name: "Premium Products",
             percentage: 8,
             product_id: "premium",
-            created_at: "2023-01-15T00:00:00Z",
           },
           {
-            id: "3",
             name: "Seasonal Promotion",
             percentage: 10,
             product_id: "seasonal",
-            created_at: "2023-02-01T00:00:00Z",
           },
           {
-            id: "4",
             name: "Clearance Items",
             percentage: 3,
             product_id: "clearance",
-            created_at: "2023-03-01T00:00:00Z",
           },
-        ])
+        ]
+
+        try {
+          const { data: insertedRules, error: insertError } = await supabase
+            .from("commission_rules")
+            .insert(defaultRules)
+            .select()
+
+          if (insertError) {
+            console.error("Error inserting default rules:", insertError)
+            // Fall back to mock data if insert fails
+            setCommissionRules([
+              {
+                id: "1",
+                name: "Standard Commission",
+                percentage: 5,
+                product_id: "all",
+                created_at: new Date().toISOString(),
+              },
+              {
+                id: "2",
+                name: "Premium Products",
+                percentage: 8,
+                product_id: "premium",
+                created_at: new Date().toISOString(),
+              },
+              {
+                id: "3",
+                name: "Seasonal Promotion",
+                percentage: 10,
+                product_id: "seasonal",
+                created_at: new Date().toISOString(),
+              },
+              {
+                id: "4",
+                name: "Clearance Items",
+                percentage: 3,
+                product_id: "clearance",
+                created_at: new Date().toISOString(),
+              },
+            ])
+          } else {
+            // Use the newly inserted rules
+            const { data: freshRules, error: fetchError } = await supabase
+              .from("commission_rules")
+              .select("*")
+              .order("created_at", { ascending: false })
+
+            if (!fetchError && freshRules && freshRules.length > 0) {
+              setCommissionRules(freshRules)
+            }
+          }
+        } catch (insertCatchError) {
+          console.error("Exception inserting default rules:", insertCatchError)
+        }
       }
 
       // Calculate staff commissions based on sales data
-      // This is more complex as we need to join sales with profiles
       // First, get all sales with cashier information
       const { data: salesData, error: salesError } = await supabase
         .from("sales")
         .select("id, total, cashier_id, created_at")
         .order("created_at", { ascending: false })
 
-      if (salesError) {
+      if (salesError && salesError.code !== "42P01") {
         console.error("Error fetching sales data:", salesError)
         throw salesError
       }
@@ -126,16 +172,18 @@ export default function CommissionsPage() {
       // Get all cashiers/staff
       const { data: staffData, error: staffError } = await supabase
         .from("profiles")
-        .select("id, full_name, username")
-        .eq("role", "cashier")
+        .select("id, full_name, username, role")
 
       if (staffError) {
         console.error("Error fetching staff data:", staffError)
         throw staffError
       }
 
+      // Filter to only include cashiers
+      const cashiers = staffData?.filter((staff) => staff.role === "cashier") || []
+
       // Calculate commissions for each staff member
-      if (staffData && staffData.length > 0 && salesData && salesData.length > 0) {
+      if (cashiers.length > 0 && salesData && salesData.length > 0) {
         // Get current month and year
         const now = new Date()
         const currentMonth = now.getMonth()
@@ -157,7 +205,7 @@ export default function CommissionsPage() {
         const currentPeriod = `${monthNames[currentMonth]} ${currentYear}`
 
         // Calculate commissions for each staff member
-        const staffCommissionsData: StaffCommission[] = staffData.map((staff) => {
+        const staffCommissionsData: StaffCommission[] = cashiers.map((staff) => {
           // Filter sales for this staff member in the current month
           const staffSales = salesData.filter((sale) => {
             const saleDate = new Date(sale.created_at)
@@ -183,94 +231,90 @@ export default function CommissionsPage() {
           }
         })
 
-        // Filter out staff with no sales
-        const activeStaffCommissions = staffCommissionsData.filter((staff) => staff.sales > 0)
-
-        if (activeStaffCommissions.length > 0) {
-          setStaffCommissions(activeStaffCommissions)
-        } else {
-          // If no staff have sales, use mock data
-          setStaffCommissions([
-            {
-              id: "1",
-              name: "John Doe",
-              sales: 25000,
-              commission: 1250,
-              period: currentPeriod,
-            },
-            {
-              id: "2",
-              name: "Jane Smith",
-              sales: 32000,
-              commission: 1600,
-              period: currentPeriod,
-            },
-          ])
-        }
+        // Include all staff, even those with no sales
+        setStaffCommissions(staffCommissionsData)
       } else {
-        // If no staff or sales data, use mock data
+        // If no staff or sales data, create a sample staff member with the current month
+        const now = new Date()
+        const currentMonth = now.getMonth()
+        const currentYear = now.getFullYear()
+        const monthNames = [
+          "January",
+          "February",
+          "March",
+          "April",
+          "May",
+          "June",
+          "July",
+          "August",
+          "September",
+          "October",
+          "November",
+          "December",
+        ]
+        const currentPeriod = `${monthNames[currentMonth]} ${currentYear}`
+
         setStaffCommissions([
           {
-            id: "1",
-            name: "John Doe",
-            sales: 25000,
-            commission: 1250,
-            period: "March 2023",
-          },
-          {
-            id: "2",
-            name: "Jane Smith",
-            sales: 32000,
-            commission: 1600,
-            period: "March 2023",
-          },
-          {
-            id: "3",
-            name: "Bob Johnson",
-            sales: 18000,
-            commission: 900,
-            period: "March 2023",
-          },
-          {
-            id: "4",
-            name: "Alice Williams",
-            sales: 30000,
-            commission: 1500,
-            period: "March 2023",
+            id: "sample-1",
+            name: "Sample Staff",
+            sales: 0,
+            commission: 0,
+            period: currentPeriod,
           },
         ])
       }
     } catch (error) {
       console.error("Error fetching commission data:", error)
-      // Keep the mock data as fallback
+      // Use current date for mock data
+      const now = new Date()
+      const currentMonth = now.getMonth()
+      const currentYear = now.getFullYear()
+      const monthNames = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+      ]
+      const currentPeriod = `${monthNames[currentMonth]} ${currentYear}`
+
+      // Keep the mock data as fallback with current date
       setCommissionRules([
         {
           id: "1",
           name: "Standard Commission",
           percentage: 5,
           product_id: "all",
-          created_at: "2023-01-01T00:00:00Z",
+          created_at: new Date().toISOString(),
         },
         {
           id: "2",
           name: "Premium Products",
           percentage: 8,
           product_id: "premium",
-          created_at: "2023-01-15T00:00:00Z",
+          created_at: new Date().toISOString(),
         },
         {
           id: "3",
           name: "Seasonal Promotion",
           percentage: 10,
           product_id: "seasonal",
-          created_at: "2023-02-01T00:00:00Z",
+          created_at: new Date().toISOString(),
         },
         {
           id: "4",
           name: "Clearance Items",
           percentage: 3,
           product_id: "clearance",
-          created_at: "2023-03-01T00:00:00Z",
+          created_at: new Date().toISOString(),
         },
       ])
       setStaffCommissions([
@@ -279,28 +323,14 @@ export default function CommissionsPage() {
           name: "John Doe",
           sales: 25000,
           commission: 1250,
-          period: "March 2023",
+          period: currentPeriod,
         },
         {
           id: "2",
           name: "Jane Smith",
           sales: 32000,
           commission: 1600,
-          period: "March 2023",
-        },
-        {
-          id: "3",
-          name: "Bob Johnson",
-          sales: 18000,
-          commission: 900,
-          period: "March 2023",
-        },
-        {
-          id: "4",
-          name: "Alice Williams",
-          sales: 30000,
-          commission: 1500,
-          period: "March 2023",
+          period: currentPeriod,
         },
       ])
     } finally {
@@ -369,14 +399,22 @@ export default function CommissionsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {staffCommissions.map((staff) => (
-                <TableRow key={staff.id}>
-                  <TableCell>{staff.name}</TableCell>
-                  <TableCell>{formatPrice(staff.sales)}</TableCell>
-                  <TableCell>{formatPrice(staff.commission)}</TableCell>
-                  <TableCell>{staff.period}</TableCell>
+              {staffCommissions.length > 0 ? (
+                staffCommissions.map((staff) => (
+                  <TableRow key={staff.id}>
+                    <TableCell>{staff.name}</TableCell>
+                    <TableCell>{formatPrice(staff.sales)}</TableCell>
+                    <TableCell>{formatPrice(staff.commission)}</TableCell>
+                    <TableCell>{staff.period}</TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center py-4">
+                    No commission data available for this period
+                  </TableCell>
                 </TableRow>
-              ))}
+              )}
             </TableBody>
           </Table>
         </CardContent>
