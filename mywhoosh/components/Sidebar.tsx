@@ -4,7 +4,6 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useLanguage } from "@/contexts/language-context"
 import { useAuth } from "@/contexts/auth-context"
-import { Wallet } from "lucide-react"
 import {
   BarChart3,
   ClipboardList,
@@ -18,8 +17,10 @@ import {
   Target,
   Percent,
   Database,
+  Wallet,
+  AlertTriangle,
 } from "lucide-react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,6 +31,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Badge } from "@/components/ui/badge"
 import { supabase } from "@/lib/supabase"
 
 export function Sidebar() {
@@ -38,6 +40,19 @@ export function Sidebar() {
   const { t, dir } = useLanguage()
   const { user } = useAuth()
   const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false)
+  const [lowStockCount, setLowStockCount] = useState(0)
+
+  useEffect(() => {
+    const fetchLowStockCount = async () => {
+      const { data } = await supabase.from("products").select("*")
+
+      // Filter products where stock is less than min_stock
+      const lowStock = data?.filter((product) => product.stock < product.min_stock) || []
+      setLowStockCount(lowStock.length)
+    }
+
+    fetchLowStockCount()
+  }, [])
 
   const isActive = (path: string) => {
     return pathname === path || pathname.startsWith(path + "/")
@@ -60,6 +75,7 @@ export function Sidebar() {
     { name: t("dashboard"), href: "/dashboard", icon: Home },
     { name: t("inventory"), href: "/inventory", icon: Package },
     { name: t("pos"), href: "/pos", icon: ShoppingCart },
+    { name: t("alerts"), href: "/alerts", icon: AlertTriangle, badge: lowStockCount > 0 ? lowStockCount : null },
     { name: t("sales"), href: "/sales", icon: ClipboardList },
     { name: t("expenses"), href: "/expenses", icon: Wallet },
     { name: t("users"), href: "/users", icon: Users },
@@ -93,6 +109,14 @@ export function Sidebar() {
               >
                 <link.icon className="h-5 w-5" />
                 <span>{link.name}</span>
+                {link.badge && (
+                  <Badge
+                    variant="outline"
+                    className="ml-auto bg-red-100 text-red-800 hover:bg-red-100 hover:text-red-800"
+                  >
+                    {link.badge}
+                  </Badge>
+                )}
               </Link>
               {link.subItems && isActive(link.href) && (
                 <ul className="ml-6 mt-1 space-y-1">

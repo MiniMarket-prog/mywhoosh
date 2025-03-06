@@ -4,6 +4,7 @@ import type React from "react"
 
 import { createContext, useContext, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
+import { Users } from "lucide-react"
 
 export type Language = "en" | "es" | "fr" | "ar"
 
@@ -254,6 +255,7 @@ const translations: Record<string, Record<string, string>> = {
     dashboard: "لوحة التحكم",
     "point.of.sale": "نقطة البيع",
     inventory: "المخزون",
+    users: "المستخدمين",
     alerts: "التنبيهات",
     sales: "المبيعات",
     reports: "التقارير",

@@ -1,15 +1,19 @@
 import type React from "react"
-import type { Metadata } from "next"
-import { Inter } from "next/font/google"
-import "./globals.css"
 import { AuthProvider } from "@/contexts/auth-context"
-import { LanguageProvider } from "@/contexts/language-context"
-
-const inter = Inter({ subsets: ["latin"] })
+import "./globals.css"
+import type { Metadata, Viewport } from "next"
 
 export const metadata: Metadata = {
   title: "Mini Market",
-  description: "A simple POS system for small businesses",
+  description: "Point of sale and inventory management system",
+}
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: "#000000",
 }
 
 export default function RootLayout({
@@ -19,10 +23,14 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
-        <AuthProvider>
-          <LanguageProvider>{children}</LanguageProvider>
-        </AuthProvider>
+      <head>
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <link rel="manifest" href="/manifest.json" />
+      </head>
+      <body>
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   )

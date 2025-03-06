@@ -1,88 +1,95 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
+import type React from "react"
 
-interface UserProfile {
+import { createContext, useContext, useEffect, useState } from "react"
+import { supabase } from "@/lib/supabase"
+import type { User } from "@supabase/supabase-js"
+
+// Define the UserProfile type to match what's in your database
+export type UserProfile = {
   id: string
   email: string
-  role: "admin" | "cashier"
-  name: string
+  username?: string
+  avatar_url?: string
+  role?: string
+  // Add any other fields that exist in your profiles table
 }
 
-interface AuthContextType {
-  user: any | null
+type AuthContextType = {
+  user: User | null
   profile: UserProfile | null
-  loading: boolean
-  signIn: (email: string, password: string) => Promise<void>
+  isLoading: boolean // Add this property
   signOut: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<any | null>(null)
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<UserProfile | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
 
-  // For development purposes, create a mock admin profile
   useEffect(() => {
-    // This is just for development - remove in production
-    setProfile({
-      id: "mock-user-id",
-      email: "admin@example.com",
-      role: "admin",
-      name: "Admin User",
+    // Set up auth state listener
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      setUser(session?.user || null)
+      if (session?.user) {
+        await fetchProfile(session.user.id)
+      } else {
+        setProfile(null)
+      }
+      setIsLoading(false)
     })
-    setLoading(false)
+
+    // Get initial session
+    const initializeAuth = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      setUser(session?.user || null)
+      if (session?.user) {
+        await fetchProfile(session.user.id)
+      }
+      setIsLoading(false)
+    }
+
+    initializeAuth()
+
+    return () => {
+      authListener.subscription.unsubscribe()
+    }
   }, [])
 
-  const signIn = async (email: string, password: string) => {
+  const fetchProfile = async (userId: string) => {
     try {
-      // Mock implementation or actual implementation
-      console.log("Sign in with", email, password)
+      const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).single()
 
-      // If using Supabase, you might do something like:
-      // const { data, error } = await supabase.auth.signInWithPassword({
-      //   email,
-      //   password
-      // })
+      if (error) {
+        throw error
+      }
 
-      // if (error) {
-      //   throw error
-      // }
-
-      // Set user state if login successful
-      // setUser(data.user)
-
-      // Fetch profile after successful login
-      // const { data: profileData } = await supabase
-      //   .from('profiles')
-      //   .select('*')
-      //   .eq('id', data.user.id)
-      //   .single()
-
-      // setProfile(profileData)
+      setProfile(data)
     } catch (error) {
-      console.error("Sign in error:", error)
-      throw error // Re-throw the error to be caught by the login page
+      console.error("Error fetching profile:", error)
+      setProfile(null)
     }
   }
 
   const signOut = async () => {
-    // Mock implementation
-    console.log("Sign out")
+    await supabase.auth.signOut()
+    setUser(null)
+    setProfile(null)
   }
 
-  return <AuthContext.Provider value={{ user, profile, loading, signIn, signOut }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ user, profile, isLoading, signOut }}>{children}</AuthContext.Provider>
 }
 
-export function useAuth() {
+export const useAuth = () => {
   const context = useContext(AuthContext)
-
   if (context === undefined) {
     throw new Error("useAuth must be used within an AuthProvider")
   }
-
   return context
 }
 
