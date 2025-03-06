@@ -5,7 +5,26 @@ import type React from "react"
 // Add this type declaration at the top of the file, before the component
 declare global {
   interface Window {
-    JsBarcode: any
+    JsBarcode: (
+      selector: string,
+      data: string,
+      options?: {
+        format?: string
+        lineColor?: string
+        width?: number
+        height?: number
+        displayValue?: boolean
+        fontSize?: number
+        margin?: number
+        background?: string
+        text?: string
+        font?: string
+        textAlign?: string
+        textPosition?: string
+        textMargin?: number
+        fontOptions?: string
+      },
+    ) => void
   }
 }
 
@@ -27,10 +46,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/components/ui/use-toast"
 import { useAuth } from "@/contexts/auth-context"
 import { supabase } from "@/lib/supabase"
-import { Barcode, Edit, PlusCircle, Trash, Printer, Search } from "lucide-react"
+import { Barcode, Edit, PlusCircle, Trash, Printer, Layout, Search } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
 import Script from "next/script"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 type Product = {
   id: string
@@ -43,6 +63,12 @@ type Product = {
   min_stock: number
 }
 
+type LabelTemplate = {
+  id: string
+  name: string
+  description: string
+}
+
 export default function InventoryPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
@@ -52,6 +78,7 @@ export default function InventoryPage() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isPrintDialogOpen, setIsPrintDialogOpen] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [selectedTemplate, setSelectedTemplate] = useState<string>("standard")
   const [newProduct, setNewProduct] = useState({
     name: "",
     barcode: "",
@@ -67,62 +94,33 @@ export default function InventoryPage() {
   const router = useRouter()
   const printRef = useRef<HTMLDivElement>(null)
   const [barcodeLoaded, setBarcodeLoaded] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    if (profile?.role !== "admin") {
-      router.push("/dashboard")
-      return
-    }
+  // Define label templates
+  const labelTemplates: LabelTemplate[] = [
+    {
+      id: "standard",
+      name: "Standard",
+      description: "Simple vertical layout with product name, barcode, price and date",
+    },
+    {
+      id: "compact",
+      name: "Compact",
+      description: "Horizontal layout with smaller barcode, ideal for small labels",
+    },
+    {
+      id: "detailed",
+      name: "Detailed",
+      description: "Includes product category and stock information",
+    },
+    {
+      id: "minimal",
+      name: "Minimal",
+      description: "Just the barcode and price",
+    },
+  ]
 
-    fetchProducts()
-  }, [profile, router])
-
-  useEffect(() => {
-    // Filter products based on search term
-    if (searchTerm.trim() === "") {
-      setFilteredProducts(products)
-    } else {
-      const searchTermLower = searchTerm.toLowerCase()
-      const filtered = products.filter(
-        (product) =>
-          product.name.toLowerCase().includes(searchTermLower) ||
-          product.barcode.toLowerCase().includes(searchTermLower),
-      )
-      setFilteredProducts(filtered)
-    }
-  }, [searchTerm, products])
-
-  useEffect(() => {
-    // Generate barcode when dialog is open and library is loaded
-    if (isPrintDialogOpen && selectedProduct && barcodeLoaded) {
-      // Add a small delay to ensure the SVG element is in the DOM
-      const timer = setTimeout(() => {
-        try {
-          window.JsBarcode("#barcode", selectedProduct.barcode, {
-            format: "CODE128", // Change format to CODE128 which is more flexible
-            lineColor: "#000",
-            width: 2,
-            height: 100,
-            displayValue: true, // Show the barcode number
-            fontSize: 12,
-            margin: 10,
-            background: "#ffffff",
-          })
-        } catch (error) {
-          console.error("Error generating barcode:", error)
-          toast({
-            title: "Error",
-            description: "Failed to generate barcode",
-            variant: "destructive",
-          })
-        }
-      }, 100)
-
-      return () => clearTimeout(timer)
-    }
-  }, [isPrintDialogOpen, selectedProduct, barcodeLoaded, toast])
-
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     setIsLoading(true)
 
     const { data, error } = await supabase.from("products").select("*").order("name")
@@ -140,7 +138,101 @@ export default function InventoryPage() {
     }
 
     setIsLoading(false)
-  }
+  }, [toast])
+
+  useEffect(() => {
+    if (profile?.role !== "admin") {
+      router.push("/dashboard")
+      return
+    }
+
+    fetchProducts()
+  }, [profile, router, fetchProducts])
+
+  // Add search functionality
+  useEffect(() => {
+    if (searchTerm) {
+      const filtered = products.filter(
+        (product) =>
+          product.name.toLowerCase().includes(searchTerm.toLowerCase()) || product.barcode.includes(searchTerm),
+      )
+      setFilteredProducts(filtered)
+    } else {
+      setFilteredProducts(products)
+    }
+  }, [searchTerm, products])
+
+  useEffect(() => {
+    // Only attempt to generate barcode when dialog is open, product is selected, and library is loaded
+    if (isPrintDialogOpen && selectedProduct && barcodeLoaded && window.JsBarcode) {
+      // Use setTimeout to ensure the DOM has been updated and the element exists
+      setTimeout(() => {
+        try {
+          const barcodeElement = document.getElementById("barcode")
+          if (!barcodeElement) {
+            console.error("Barcode element not found in DOM")
+            return
+          }
+
+          // Different barcode configurations based on template
+          const barcodeConfig = {
+            standard: {
+              format: "CODE128",
+              lineColor: "#000",
+              width: 2,
+              height: 100,
+              displayValue: true,
+              fontSize: 12,
+              margin: 10,
+              background: "#ffffff",
+            },
+            compact: {
+              format: "CODE128",
+              lineColor: "#000",
+              width: 1.5,
+              height: 50,
+              displayValue: true,
+              fontSize: 10,
+              margin: 5,
+              background: "#ffffff",
+            },
+            detailed: {
+              format: "CODE128",
+              lineColor: "#000",
+              width: 2,
+              height: 80,
+              displayValue: true,
+              fontSize: 12,
+              margin: 10,
+              background: "#ffffff",
+            },
+            minimal: {
+              format: "CODE128",
+              lineColor: "#000",
+              width: 2,
+              height: 60,
+              displayValue: false,
+              margin: 5,
+              background: "#ffffff",
+            },
+          }
+
+          window.JsBarcode(
+            "#barcode",
+            selectedProduct.barcode,
+            barcodeConfig[selectedTemplate as keyof typeof barcodeConfig],
+          )
+        } catch (error) {
+          console.error("Error generating barcode:", error)
+          toast({
+            title: "Error",
+            description: "Failed to generate barcode",
+            variant: "destructive",
+          })
+        }
+      }, 100) // Small delay to ensure DOM is ready
+    }
+  }, [isPrintDialogOpen, selectedProduct, barcodeLoaded, selectedTemplate, toast])
 
   const generateBarcode = () => {
     // Generate a random 13-digit EAN barcode
@@ -188,11 +280,12 @@ export default function InventoryPage() {
       })
 
       fetchProducts()
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred"
       console.error("Error adding product:", error)
       toast({
         title: "Error",
-        description: error.message || "Failed to add product",
+        description: errorMessage,
         variant: "destructive",
       })
     }
@@ -217,11 +310,12 @@ export default function InventoryPage() {
       setEditingProduct(null)
 
       fetchProducts()
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred"
       console.error("Error updating product:", error)
       toast({
         title: "Error",
-        description: error.message || "Failed to update product",
+        description: errorMessage,
         variant: "destructive",
       })
     }
@@ -241,11 +335,12 @@ export default function InventoryPage() {
       })
 
       fetchProducts()
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred"
       console.error("Error deleting product:", error)
       toast({
         title: "Error",
-        description: error.message || "Failed to delete product",
+        description: errorMessage,
         variant: "destructive",
       })
     }
@@ -259,22 +354,181 @@ export default function InventoryPage() {
   const printBarcode = () => {
     if (!printRef.current) return
 
+    // Open a new window/tab
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) {
+      toast({
+        title: "Error",
+        description: "Could not open print window. Please check your popup blocker settings.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Get the print content
     const printContents = printRef.current.innerHTML
-    const originalContents = document.body.innerHTML
 
-    document.body.innerHTML = printContents
-    window.print()
-    document.body.innerHTML = originalContents
+    // Write to the new window
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Print Barcode - ${selectedProduct?.name || "Product"}</title>
+          <style>
+            body {
+              font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+              padding: 20px;
+              max-width: 400px;
+              margin: 0 auto;
+            }
+            @media print {
+              body {
+                padding: 0;
+              }
+              button {
+                display: none;
+              }
+            }
+          </style>
+          <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+        </head>
+        <body>
+          <div>${printContents}</div>
+          <button onclick="window.print()" style="margin-top: 20px; padding: 8px 16px; background: #0284c7; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            Print
+          </button>
+          <script>
+            // Re-render the barcode in the new window
+            window.onload = function() {
+              try {
+                JsBarcode("#barcode", "${selectedProduct?.barcode || ""}", ${JSON.stringify({
+                  format: "CODE128",
+                  lineColor: "#000",
+                  width: 2,
+                  height: selectedTemplate === "compact" ? 50 : selectedTemplate === "minimal" ? 60 : 100,
+                  displayValue: selectedTemplate !== "minimal",
+                  fontSize: 12,
+                  margin: 10,
+                  background: "#ffffff",
+                })});
+                // Auto-print on load (optional, uncomment if desired)
+                // window.print();
+              } catch(e) {
+                console.error("Error rendering barcode in print window:", e);
+              }
+            };
+          </script>
+        </body>
+      </html>
+    `)
 
-    // Reload the page to restore React functionality
-    window.location.reload()
+    // Finish writing and focus the new window
+    printWindow.document.close()
+    printWindow.focus()
+  }
+
+  // Handle search form submission
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    // Focus back on the search input after submission
+    if (searchInputRef.current) {
+      searchInputRef.current.focus()
+    }
+  }
+
+  // Render different label templates
+  const renderLabelTemplate = () => {
+    if (!selectedProduct) return null
+
+    switch (selectedTemplate) {
+      case "standard":
+        return (
+          <div className="flex flex-col items-center space-y-4 print:p-0">
+            {/* Product Name */}
+            <div className="text-center font-bold text-lg">{selectedProduct.name}</div>
+
+            {/* Barcode SVG */}
+            <div className="flex justify-center bg-white p-4 w-full">
+              <svg id="barcode"></svg>
+            </div>
+
+            {/* Price */}
+            <div className="text-xl font-bold">${selectedProduct.price.toFixed(2)}</div>
+
+            {/* Date */}
+            <div className="text-xs text-muted-foreground">{new Date().toLocaleDateString()}</div>
+          </div>
+        )
+
+      case "compact":
+        return (
+          <div className="flex items-center justify-between p-2 print:p-0">
+            <div className="flex flex-col">
+              <div className="font-bold">{selectedProduct.name}</div>
+              <div className="text-lg font-bold">${selectedProduct.price.toFixed(2)}</div>
+              <div className="text-xs text-muted-foreground">{new Date().toLocaleDateString()}</div>
+            </div>
+            <div className="bg-white p-2">
+              <svg id="barcode"></svg>
+            </div>
+          </div>
+        )
+
+      case "detailed":
+        return (
+          <div className="flex flex-col space-y-3 print:p-0">
+            <div className="text-center font-bold text-lg">{selectedProduct.name}</div>
+
+            <div className="flex justify-center bg-white p-3 w-full">
+              <svg id="barcode"></svg>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div>
+                <div className="font-semibold">Price:</div>
+                <div className="text-lg font-bold">${selectedProduct.price.toFixed(2)}</div>
+              </div>
+              <div>
+                <div className="font-semibold">Category:</div>
+                <div className="capitalize">{selectedProduct.category}</div>
+              </div>
+              <div>
+                <div className="font-semibold">Stock:</div>
+                <div>{selectedProduct.stock} units</div>
+              </div>
+              <div>
+                <div className="font-semibold">Date:</div>
+                <div>{new Date().toLocaleDateString()}</div>
+              </div>
+            </div>
+          </div>
+        )
+
+      case "minimal":
+        return (
+          <div className="flex flex-col items-center space-y-2 print:p-0">
+            <div className="flex justify-center bg-white p-2 w-full">
+              <svg id="barcode"></svg>
+            </div>
+            <div className="text-lg font-bold">${selectedProduct.price.toFixed(2)}</div>
+            <div className="text-xs">{selectedProduct.barcode}</div>
+          </div>
+        )
+
+      default:
+        return null
+    }
   }
 
   return (
     <div className="space-y-6">
       <Script
         src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"
-        onLoad={() => setBarcodeLoaded(true)}
+        onLoad={() => {
+          setBarcodeLoaded(true)
+          // Don't try to generate barcode here, let the useEffect handle it
+        }}
+        strategy="afterInteractive"
       />
 
       <div className="flex items-center justify-between">
@@ -401,16 +655,24 @@ export default function InventoryPage() {
         </Dialog>
       </div>
 
-      {/* Add search input */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Search by product name or barcode..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="pl-10"
-        />
-      </div>
+      {/* Add search form */}
+      <form onSubmit={handleSearchSubmit} className="flex items-center space-x-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            type="text"
+            placeholder="Search by product name or barcode..."
+            className="pl-8"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            ref={searchInputRef}
+          />
+        </div>
+        <Button type="submit" variant="outline" size="icon">
+          <Barcode className="h-4 w-4" />
+          <span className="sr-only">Search</span>
+        </Button>
+      </form>
 
       <Card>
         <CardHeader>
@@ -424,7 +686,7 @@ export default function InventoryPage() {
                 <div key={i} className="w-full h-12 bg-muted animate-pulse rounded" />
               ))}
             </div>
-          ) : (
+          ) : filteredProducts.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -438,55 +700,57 @@ export default function InventoryPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredProducts.length > 0 ? (
-                  filteredProducts.map((product) => (
-                    <TableRow key={product.id}>
-                      <TableCell className="font-medium">{product.name}</TableCell>
-                      <TableCell>{product.barcode}</TableCell>
-                      <TableCell className="capitalize">{product.category}</TableCell>
-                      <TableCell className="text-right">${product.price.toFixed(2)}</TableCell>
-                      <TableCell className="text-right">${product.cost_price.toFixed(2)}</TableCell>
-                      <TableCell className="text-right">{product.stock}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              setEditingProduct(product)
-                              setIsEditDialogOpen(true)
-                            }}
-                          >
-                            <Edit className="h-4 w-4" />
-                            <span className="sr-only">Edit</span>
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDeleteProduct(product.id)}>
-                            <Trash className="h-4 w-4" />
-                            <span className="sr-only">Delete</span>
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handlePrintBarcode(product)}>
-                            <Printer className="h-4 w-4" />
-                            <span className="sr-only">Print Barcode</span>
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center py-6">
-                      <div className="flex flex-col items-center justify-center">
-                        <Search className="h-8 w-8 text-muted-foreground mb-2" />
-                        <p className="text-lg font-medium">No products found</p>
-                        <p className="text-sm text-muted-foreground">
-                          Try a different search term or clear the search to see all products
-                        </p>
+                {filteredProducts.map((product) => (
+                  <TableRow key={product.id}>
+                    <TableCell className="font-medium">{product.name}</TableCell>
+                    <TableCell>{product.barcode}</TableCell>
+                    <TableCell className="capitalize">{product.category}</TableCell>
+                    <TableCell className="text-right">${product.price.toFixed(2)}</TableCell>
+                    <TableCell className="text-right">${product.cost_price.toFixed(2)}</TableCell>
+                    <TableCell className="text-right">{product.stock}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            setEditingProduct(product)
+                            setIsEditDialogOpen(true)
+                          }}
+                        >
+                          <Edit className="h-4 w-4" />
+                          <span className="sr-only">Edit</span>
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => handleDeleteProduct(product.id)}>
+                          <Trash className="h-4 w-4" />
+                          <span className="sr-only">Delete</span>
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => handlePrintBarcode(product)}>
+                          <Printer className="h-4 w-4" />
+                          <span className="sr-only">Print Barcode</span>
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
-                )}
+                ))}
               </TableBody>
             </Table>
+          ) : (
+            <div className="text-center py-12">
+              <h3 className="text-lg font-medium">No products found</h3>
+              <p className="text-muted-foreground">
+                {searchTerm ? (
+                  <>
+                    No products matching &quot;{searchTerm}&quot;
+                    <Button variant="link" onClick={() => setSearchTerm("")} className="ml-2">
+                      Clear search
+                    </Button>
+                  </>
+                ) : (
+                  "Add products to your inventory to see them here"
+                )}
+              </p>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -605,31 +869,63 @@ export default function InventoryPage() {
 
       {/* Barcode Print Dialog */}
       <Dialog open={isPrintDialogOpen} onOpenChange={setIsPrintDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Print Barcode Label</DialogTitle>
             <DialogDescription>Preview and print the barcode label for {selectedProduct?.name}</DialogDescription>
           </DialogHeader>
 
-          <div ref={printRef} className="p-4 border rounded-md">
-            <div className="flex flex-col items-center space-y-2 print:p-0">
-              {/* Product Name */}
-              <div className="text-center font-bold">{selectedProduct?.name}</div>
-
-              {/* Add this right after the Product Name div */}
-              {!barcodeLoaded && <div className="h-20 w-64 animate-pulse bg-muted rounded"></div>}
-
-              {/* Barcode SVG */}
-              <div className="flex justify-center bg-white p-4 w-full">
-                <svg id="barcode"></svg>
-              </div>
-
-              {/* Price */}
-              <div className="text-lg font-bold">${selectedProduct?.price.toFixed(2)}</div>
-
-              {/* Date */}
-              <div className="text-xs text-muted-foreground">{new Date().toLocaleDateString()}</div>
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Layout className="h-4 w-4 text-muted-foreground" />
+              <Label htmlFor="template-select">Label Template</Label>
+              <Select value={selectedTemplate} onValueChange={setSelectedTemplate}>
+                <SelectTrigger id="template-select" className="w-[200px]">
+                  <SelectValue placeholder="Select template" />
+                </SelectTrigger>
+                <SelectContent>
+                  {labelTemplates.map((template) => (
+                    <SelectItem key={template.id} value={template.id}>
+                      {template.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+
+            <Tabs defaultValue="preview" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="preview">Preview</TabsTrigger>
+                <TabsTrigger value="templates">Template Gallery</TabsTrigger>
+              </TabsList>
+              <TabsContent value="preview">
+                <div ref={printRef} className="p-4 border rounded-md">
+                  {!barcodeLoaded ? (
+                    <div className="h-40 w-full animate-pulse bg-muted rounded flex items-center justify-center">
+                      <p className="text-muted-foreground">Loading barcode generator...</p>
+                    </div>
+                  ) : (
+                    renderLabelTemplate()
+                  )}
+                </div>
+              </TabsContent>
+              <TabsContent value="templates">
+                <div className="grid grid-cols-2 gap-4">
+                  {labelTemplates.map((template) => (
+                    <div
+                      key={template.id}
+                      className={`p-4 border rounded-md cursor-pointer hover:border-primary transition-colors ${
+                        selectedTemplate === template.id ? "border-primary bg-primary/5" : ""
+                      }`}
+                      onClick={() => setSelectedTemplate(template.id)}
+                    >
+                      <h3 className="font-medium">{template.name}</h3>
+                      <p className="text-sm text-muted-foreground">{template.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
 
           <DialogFooter>

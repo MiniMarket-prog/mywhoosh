@@ -1,7 +1,5 @@
 "use client"
 
-import type React from "react"
-
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -15,20 +13,20 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useToast } from "@/components/ui/use-toast"
-import { useAuth } from "@/contexts/auth-context"
 import { supabase } from "@/lib/supabase"
-import { CalendarIcon, Edit, PlusCircle, Trash } from "lucide-react"
-import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { CalendarIcon, Edit, Plus, Trash } from "lucide-react"
+import { useEffect, useState, useCallback } from "react"
 import { format, subDays, startOfMonth, endOfMonth, startOfYear } from "date-fns"
 import type { DateRange } from "react-day-picker"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useAuth } from "@/contexts/auth-context"
 
+// Define the Expense type to match our database structure
 type Expense = {
   id: string
   created_at: string
@@ -37,43 +35,62 @@ type Expense = {
   category: string
 }
 
-const EXPENSE_CATEGORIES = ["utilities", "rent", "salary", "inventory", "maintenance", "marketing", "office", "other"]
-
 export default function ExpensesPage() {
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [editingExpense, setEditingExpense] = useState<Expense | null>(null)
-  const [newExpense, setNewExpense] = useState({
-    description: "",
-    amount: "",
-    category: "other",
-  })
+  const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null)
+  const { toast } = useToast()
+  const { profile } = useAuth()
+
+  // Form states
+  const [expenseName, setExpenseName] = useState("")
+  const [expenseAmount, setExpenseAmount] = useState("")
+  const [expenseCategory, setExpenseCategory] = useState("general")
+  const [expenseDate, setExpenseDate] = useState<Date>(new Date())
+
+  // Add date range state and predefined range state
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: subDays(new Date(), 30),
     to: new Date(),
   })
   const [predefinedRange, setPredefinedRange] = useState("30days")
-  const [statistics, setStatistics] = useState({
-    total: 0,
-    byCategory: {} as Record<string, number>,
-  })
 
-  const { profile } = useAuth()
-  const { toast } = useToast()
-  const router = useRouter()
+  const fetchExpenses = useCallback(async () => {
+    setIsLoading(true)
 
-  useEffect(() => {
-    if (profile?.role !== "admin") {
-      router.push("/dashboard")
-      return
+    let query = supabase.from("expenses").select("*").order("created_at", { ascending: false })
+
+    // Add date filtering if not showing all expenses
+    if (predefinedRange !== "all" && dateRange?.from && dateRange?.to) {
+      const fromDate = dateRange.from.toISOString()
+      const toDate = dateRange.to.toISOString()
+      query = query.gte("created_at", fromDate).lte("created_at", toDate)
     }
 
+    const { data, error } = await query
+
+    if (error) {
+      const errorMessage = error.message || "Failed to fetch expenses"
+      console.error("Error fetching expenses:", error)
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    } else {
+      setExpenses(data || [])
+    }
+
+    setIsLoading(false)
+  }, [dateRange, predefinedRange, toast])
+
+  useEffect(() => {
     if (dateRange?.from && dateRange?.to) {
       fetchExpenses()
     }
-  }, [profile, router, dateRange])
+  }, [dateRange, fetchExpenses])
 
   const handlePredefinedRangeChange = (value: string) => {
     setPredefinedRange(value)
@@ -99,6 +116,9 @@ export default function ExpensesPage() {
       case "thisYear":
         from = startOfYear(today)
         break
+      case "all":
+        from = new Date(0) // Beginning of time
+        break
       default:
         from = subDays(today, 30)
     }
@@ -106,57 +126,34 @@ export default function ExpensesPage() {
     setDateRange({ from, to })
   }
 
-  const fetchExpenses = async () => {
-    if (!dateRange?.from || !dateRange?.to) return
-
-    setIsLoading(true)
-
-    try {
-      const fromDate = dateRange.from.toISOString()
-      const toDate = dateRange.to.toISOString()
-
-      const { data, error } = await supabase
-        .from("expenses")
-        .select("*")
-        .gte("created_at", fromDate)
-        .lte("created_at", toDate)
-        .order("created_at", { ascending: false })
-
-      if (error) throw error
-
-      setExpenses(data || [])
-
-      // Calculate statistics
-      const total = (data || []).reduce((sum, expense) => sum + expense.amount, 0)
-      const byCategory = (data || []).reduce(
-        (acc, expense) => {
-          acc[expense.category] = (acc[expense.category] || 0) + expense.amount
-          return acc
-        },
-        {} as Record<string, number>,
-      )
-
-      setStatistics({ total, byCategory })
-    } catch (error: any) {
-      console.error("Error fetching expenses:", error)
+  const handleAddExpense = async () => {
+    if (!expenseName.trim()) {
       toast({
         title: "Error",
-        description: "Failed to fetch expenses",
+        description: "Please enter an expense name",
         variant: "destructive",
       })
-    } finally {
-      setIsLoading(false)
+      return
     }
-  }
 
-  const handleAddExpense = async (e: React.FormEvent) => {
-    e.preventDefault()
+    if (!expenseAmount || isNaN(Number.parseFloat(expenseAmount)) || Number.parseFloat(expenseAmount) <= 0) {
+      toast({
+        title: "Error",
+        description: "Please enter a valid amount",
+        variant: "destructive",
+      })
+      return
+    }
 
     try {
+      const amount = Number.parseFloat(expenseAmount)
+
+      // Create a new expense
       const { error } = await supabase.from("expenses").insert({
-        description: newExpense.description,
-        amount: Number(newExpense.amount),
-        category: newExpense.category,
+        description: expenseName.trim(),
+        amount,
+        category: expenseCategory,
+        created_at: expenseDate.toISOString(),
       })
 
       if (error) throw error
@@ -166,38 +163,69 @@ export default function ExpensesPage() {
         description: "Expense added successfully",
       })
 
+      // Reset form
+      setExpenseName("")
+      setExpenseAmount("")
+      setExpenseCategory("general")
+      setExpenseDate(new Date())
       setIsAddDialogOpen(false)
-      setNewExpense({
-        description: "",
-        amount: "",
-        category: "other",
-      })
 
+      // Refresh expenses list
       fetchExpenses()
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to add expense"
       console.error("Error adding expense:", error)
       toast({
         title: "Error",
-        description: error.message || "Failed to add expense",
+        description: errorMessage,
         variant: "destructive",
       })
     }
   }
 
-  const handleEditExpense = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleEditExpense = (expense: Expense) => {
+    setSelectedExpense(expense)
+    setExpenseName(expense.description)
+    setExpenseAmount(expense.amount.toString())
+    setExpenseCategory(expense.category)
+    setExpenseDate(new Date(expense.created_at))
+    setIsEditDialogOpen(true)
+  }
 
-    if (!editingExpense) return
+  const handleUpdateExpense = async () => {
+    if (!selectedExpense) return
+
+    if (!expenseName.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter an expense name",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!expenseAmount || isNaN(Number.parseFloat(expenseAmount)) || Number.parseFloat(expenseAmount) <= 0) {
+      toast({
+        title: "Error",
+        description: "Please enter a valid amount",
+        variant: "destructive",
+      })
+      return
+    }
 
     try {
+      const amount = Number.parseFloat(expenseAmount)
+
+      // Update the expense
       const { error } = await supabase
         .from("expenses")
         .update({
-          description: editingExpense.description,
-          amount: editingExpense.amount,
-          category: editingExpense.category,
+          description: expenseName.trim(),
+          amount,
+          category: expenseCategory,
+          created_at: expenseDate.toISOString(),
         })
-        .eq("id", editingExpense.id)
+        .eq("id", selectedExpense.id)
 
       if (error) throw error
 
@@ -206,15 +234,22 @@ export default function ExpensesPage() {
         description: "Expense updated successfully",
       })
 
+      // Reset form
+      setExpenseName("")
+      setExpenseAmount("")
+      setExpenseCategory("general")
+      setExpenseDate(new Date())
       setIsEditDialogOpen(false)
-      setEditingExpense(null)
+      setSelectedExpense(null)
 
+      // Refresh expenses list
       fetchExpenses()
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to update expense"
       console.error("Error updating expense:", error)
       toast({
         title: "Error",
-        description: error.message || "Failed to update expense",
+        description: errorMessage,
         variant: "destructive",
       })
     }
@@ -233,16 +268,44 @@ export default function ExpensesPage() {
         description: "Expense deleted successfully",
       })
 
+      // Refresh expenses list
       fetchExpenses()
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to delete expense"
       console.error("Error deleting expense:", error)
       toast({
         title: "Error",
-        description: error.message || "Failed to delete expense",
+        description: errorMessage,
         variant: "destructive",
       })
     }
   }
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString)
+    return format(date, "MMM d, yyyy")
+  }
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+    }).format(amount)
+  }
+
+  const resetForm = () => {
+    setExpenseName("")
+    setExpenseAmount("")
+    setExpenseCategory("general")
+    setExpenseDate(new Date())
+  }
+
+  const calculateTotalExpenses = () => {
+    return expenses.reduce((total, expense) => total + expense.amount, 0)
+  }
+
+  // Check if user is admin for conditional rendering
+  const isAdmin = profile?.role === "admin"
 
   return (
     <div className="space-y-6">
@@ -263,6 +326,7 @@ export default function ExpensesPage() {
               <SelectItem value="thisMonth">This month</SelectItem>
               <SelectItem value="lastMonth">Last month</SelectItem>
               <SelectItem value="thisYear">This year</SelectItem>
+              <SelectItem value="all">All time</SelectItem>
               <SelectItem value="custom">Custom range</SelectItem>
             </SelectContent>
           </Select>
@@ -301,107 +365,123 @@ export default function ExpensesPage() {
             </Popover>
           )}
 
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <Dialog
+            open={isAddDialogOpen}
+            onOpenChange={(open) => {
+              setIsAddDialogOpen(open)
+              if (!open) resetForm()
+            }}
+          >
             <DialogTrigger asChild>
               <Button>
-                <PlusCircle className="mr-2 h-4 w-4" />
+                <Plus className="mr-2 h-4 w-4" />
                 Add Expense
               </Button>
             </DialogTrigger>
             <DialogContent>
-              <form onSubmit={handleAddExpense}>
-                <DialogHeader>
-                  <DialogTitle>Add New Expense</DialogTitle>
-                  <DialogDescription>Add a new expense to track your business costs.</DialogDescription>
-                </DialogHeader>
-                <div className="grid gap-4 py-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="description">Description</Label>
-                    <Input
-                      id="description"
-                      value={newExpense.description}
-                      onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="amount">Amount</Label>
-                    <Input
-                      id="amount"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={newExpense.amount}
-                      onChange={(e) => setNewExpense({ ...newExpense, amount: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="category">Category</Label>
-                    <Select
-                      value={newExpense.category}
-                      onValueChange={(value) => setNewExpense({ ...newExpense, category: value })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select category" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {EXPENSE_CATEGORIES.map((category) => (
-                          <SelectItem key={category} value={category}>
-                            {category.charAt(0).toUpperCase() + category.slice(1)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+              <DialogHeader>
+                <DialogTitle>Add New Expense</DialogTitle>
+                <DialogDescription>Enter the details of the expense you want to add.</DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="expense-name" className="text-right">
+                    Name
+                  </Label>
+                  <Input
+                    id="expense-name"
+                    value={expenseName}
+                    onChange={(e) => setExpenseName(e.target.value)}
+                    className="col-span-3"
+                    placeholder="Rent, Utilities, Supplies, etc."
+                  />
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="expense-amount" className="text-right">
+                    Amount
+                  </Label>
+                  <Input
+                    id="expense-amount"
+                    type="number"
+                    value={expenseAmount}
+                    onChange={(e) => setExpenseAmount(e.target.value)}
+                    className="col-span-3"
+                    placeholder="0.00"
+                    min="0.01"
+                    step="0.01"
+                  />
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="expense-category" className="text-right">
+                    Category
+                  </Label>
+                  <Select value={expenseCategory} onValueChange={setExpenseCategory}>
+                    <SelectTrigger id="expense-category" className="col-span-3">
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="general">General</SelectItem>
+                      <SelectItem value="rent">Rent</SelectItem>
+                      <SelectItem value="utilities">Utilities</SelectItem>
+                      <SelectItem value="inventory">Inventory</SelectItem>
+                      <SelectItem value="salary">Salary</SelectItem>
+                      <SelectItem value="marketing">Marketing</SelectItem>
+                      <SelectItem value="maintenance">Maintenance</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="expense-date" className="text-right">
+                    Date
+                  </Label>
+                  <div className="col-span-3">
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "w-full justify-start text-left font-normal",
+                            !expenseDate && "text-muted-foreground",
+                          )}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {expenseDate ? format(expenseDate, "PPP") : <span>Pick a date</span>}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={expenseDate}
+                          onSelect={(date) => date && setExpenseDate(date)}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </div>
-                <DialogFooter>
-                  <Button type="submit">Add Expense</Button>
-                </DialogFooter>
-              </form>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleAddExpense}>Add Expense</Button>
+              </DialogFooter>
             </DialogContent>
           </Dialog>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">${statistics.total.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground">
-              {dateRange?.from && dateRange?.to
-                ? `${format(dateRange.from, "MMM d, yyyy")} - ${format(dateRange.to, "MMM d, yyyy")}`
-                : "Select a date range"}
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Top 3 expense categories */}
-        {Object.entries(statistics.byCategory)
-          .sort(([, a], [, b]) => b - a)
-          .slice(0, 3)
-          .map(([category, amount]) => (
-            <Card key={category}>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium capitalize">{category}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">${amount.toFixed(2)}</div>
-                <p className="text-xs text-muted-foreground">
-                  {((amount / statistics.total) * 100).toFixed(1)}% of total expenses
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-      </div>
-
       <Card>
         <CardHeader>
-          <CardTitle>Expense History</CardTitle>
-          <CardDescription>View and manage your expense records.</CardDescription>
+          <CardTitle>Expenses</CardTitle>
+          <CardDescription>
+            {predefinedRange === "all"
+              ? "Showing all expenses"
+              : dateRange?.from && dateRange?.to
+                ? `Expenses from ${format(dateRange.from, "MMM d, yyyy")} to ${format(dateRange.to, "MMM d, yyyy")}`
+                : "View all expenses and their details."}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -411,52 +491,55 @@ export default function ExpensesPage() {
               ))}
             </div>
           ) : expenses.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {expenses.map((expense) => (
-                  <TableRow key={expense.id}>
-                    <TableCell>{format(new Date(expense.created_at), "MMM d, yyyy")}</TableCell>
-                    <TableCell>{expense.description}</TableCell>
-                    <TableCell className="capitalize">{expense.category}</TableCell>
-                    <TableCell className="text-right">${expense.amount.toFixed(2)}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            setEditingExpense(expense)
-                            setIsEditDialogOpen(true)
-                          }}
-                        >
-                          <Edit className="h-4 w-4" />
-                          <span className="sr-only">Edit</span>
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleDeleteExpense(expense.id)}>
-                          <Trash className="h-4 w-4" />
-                          <span className="sr-only">Delete</span>
-                        </Button>
-                      </div>
-                    </TableCell>
+            <>
+              <div className="mb-4 p-4 bg-muted rounded-lg">
+                <div className="flex justify-between items-center">
+                  <span className="font-medium">Total Expenses:</span>
+                  <span className="font-bold text-lg">{formatCurrency(calculateTotalExpenses())}</span>
+                </div>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {expenses.map((expense) => (
+                    <TableRow key={expense.id}>
+                      <TableCell>{formatDate(expense.created_at)}</TableCell>
+                      <TableCell>{expense.description}</TableCell>
+                      <TableCell className="capitalize">{expense.category}</TableCell>
+                      <TableCell className="text-right font-medium">{formatCurrency(expense.amount)}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button variant="ghost" size="icon" onClick={() => handleEditExpense(expense)}>
+                            <Edit className="h-4 w-4" />
+                            <span className="sr-only">Edit</span>
+                          </Button>
+                          {isAdmin && (
+                            <Button variant="ghost" size="icon" onClick={() => handleDeleteExpense(expense.id)}>
+                              <Trash className="h-4 w-4" />
+                              <span className="sr-only">Delete</span>
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </>
           ) : (
             <div className="text-center py-12">
               <h3 className="text-lg font-medium">No expenses found</h3>
               <p className="text-muted-foreground">
                 {predefinedRange === "all"
-                  ? "Add your first expense to start tracking"
+                  ? "Add an expense to see it here"
                   : "No expenses found for the selected period"}
               </p>
             </div>
@@ -464,61 +547,103 @@ export default function ExpensesPage() {
         </CardContent>
       </Card>
 
-      {/* Edit Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+      <Dialog
+        open={isEditDialogOpen}
+        onOpenChange={(open) => {
+          setIsEditDialogOpen(open)
+          if (!open) {
+            resetForm()
+            setSelectedExpense(null)
+          }
+        }}
+      >
         <DialogContent>
-          {editingExpense && (
-            <form onSubmit={handleEditExpense}>
-              <DialogHeader>
-                <DialogTitle>Edit Expense</DialogTitle>
-                <DialogDescription>Update expense details.</DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-description">Description</Label>
-                  <Input
-                    id="edit-description"
-                    value={editingExpense.description}
-                    onChange={(e) => setEditingExpense({ ...editingExpense, description: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-amount">Amount</Label>
-                  <Input
-                    id="edit-amount"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={editingExpense.amount}
-                    onChange={(e) => setEditingExpense({ ...editingExpense, amount: Number(e.target.value) })}
-                    required
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-category">Category</Label>
-                  <Select
-                    value={editingExpense.category}
-                    onValueChange={(value) => setEditingExpense({ ...editingExpense, category: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {EXPENSE_CATEGORIES.map((category) => (
-                        <SelectItem key={category} value={category}>
-                          {category.charAt(0).toUpperCase() + category.slice(1)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+          <DialogHeader>
+            <DialogTitle>Edit Expense</DialogTitle>
+            <DialogDescription>Update the details of this expense.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="edit-expense-name" className="text-right">
+                Name
+              </Label>
+              <Input
+                id="edit-expense-name"
+                value={expenseName}
+                onChange={(e) => setExpenseName(e.target.value)}
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="edit-expense-amount" className="text-right">
+                Amount
+              </Label>
+              <Input
+                id="edit-expense-amount"
+                type="number"
+                value={expenseAmount}
+                onChange={(e) => setExpenseAmount(e.target.value)}
+                className="col-span-3"
+                min="0.01"
+                step="0.01"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="edit-expense-category" className="text-right">
+                Category
+              </Label>
+              <Select value={expenseCategory} onValueChange={setExpenseCategory}>
+                <SelectTrigger id="edit-expense-category" className="col-span-3">
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="general">General</SelectItem>
+                  <SelectItem value="rent">Rent</SelectItem>
+                  <SelectItem value="utilities">Utilities</SelectItem>
+                  <SelectItem value="inventory">Inventory</SelectItem>
+                  <SelectItem value="salary">Salary</SelectItem>
+                  <SelectItem value="marketing">Marketing</SelectItem>
+                  <SelectItem value="maintenance">Maintenance</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="edit-expense-date" className="text-right">
+                Date
+              </Label>
+              <div className="col-span-3">
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !expenseDate && "text-muted-foreground",
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {expenseDate ? format(expenseDate, "PPP") : <span>Pick a date</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={expenseDate}
+                      onSelect={(date) => date && setExpenseDate(date)}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
-              <DialogFooter>
-                <Button type="submit">Save Changes</Button>
-              </DialogFooter>
-            </form>
-          )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateExpense}>Save Changes</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -80,6 +80,7 @@ export default function UsersPage() {
         throw new Error(data.error || "Failed to fetch users")
       }
 
+      console.log("Users data:", data.users)
       setUsers(data.users || [])
     } catch (error: any) {
       console.error("Error fetching users:", error)
@@ -190,6 +191,7 @@ export default function UsersPage() {
     }
 
     try {
+      setIsProcessing(true)
       const response = await fetch(`/api/users?id=${userId}`, {
         method: "DELETE",
       })
@@ -213,6 +215,8 @@ export default function UsersPage() {
         description: error.message || "Failed to delete user",
         variant: "destructive",
       })
+    } finally {
+      setIsProcessing(false)
     }
   }
 
@@ -318,10 +322,10 @@ export default function UsersPage() {
                 users.map((user) => (
                   <div key={user.id} className="flex items-center justify-between border-b pb-4">
                     <div>
-                      <p className="font-medium">{user.full_name || user.username}</p>
-                      <p className="text-sm text-muted-foreground">{user.email}</p>
+                      <p className="font-medium">{user.full_name || user.username || "Unnamed User"}</p>
+                      <p className="text-sm text-muted-foreground">{user.email || "No email"}</p>
                       <div className="flex gap-4 mt-1">
-                        <p className="text-xs text-muted-foreground capitalize">Role: {user.role}</p>
+                        <p className="text-xs text-muted-foreground capitalize">Role: {user.role || "No role"}</p>
                         <p className="text-xs text-muted-foreground">Created: {formatDate(user.created_at)}</p>
                       </div>
                     </div>
@@ -334,7 +338,7 @@ export default function UsersPage() {
                             id: user.id,
                             email: user.email || "",
                             password: "",
-                            role: user.role,
+                            role: user.role || "cashier",
                             full_name: user.full_name || "",
                           })
                           setIsEditDialogOpen(true)
@@ -343,7 +347,12 @@ export default function UsersPage() {
                         <Edit className="h-4 w-4" />
                         <span className="sr-only">Edit</span>
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(user.id)}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDeleteUser(user.id)}
+                        disabled={isProcessing}
+                      >
                         <Trash className="h-4 w-4" />
                         <span className="sr-only">Delete</span>
                       </Button>

@@ -1,218 +1,124 @@
 "use client"
 
+import type React from "react"
+
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import {
-  LayoutDashboard,
-  ShoppingCart,
-  Package,
-  AlertTriangle,
-  Receipt,
-  PieChart,
-  CreditCard,
-  Users,
-  ChevronLeft,
-  ChevronRight,
-  Settings,
-} from "lucide-react"
-import { useAuth } from "@/contexts/auth-context"
-import { Badge } from "@/components/ui/badge"
-import { useSidebar } from "@/contexts/sidebar-context"
-import { Button } from "@/components/ui/button"
-import { useState, useEffect } from "react"
-import { supabase } from "@/lib/supabase"
-import { useLanguage } from "@/contexts/language-context"
+import { BarChart3, Bell, Home, Package, ShoppingCart, Users, Receipt, DollarSign } from "lucide-react"
 
-const adminLinks = [
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+// Try to import useAuth, but provide a fallback if it fails
+let useAuth: () => { profile?: { role?: string } } = () => ({ profile: { role: "admin" } })
+try {
+  const authModule = require("@/contexts/auth-context")
+  useAuth = authModule.useAuth
+} catch (error) {
+  console.warn("Auth context not available, defaulting to admin role")
+}
+
+interface SubNavItem {
+  name: string
+  href: string
+}
+
+interface NavItem {
+  name: string
+  href: string
+  icon: React.ElementType
+  subItems?: SubNavItem[]
+}
+
+const adminLinks: NavItem[] = [
+  { name: "Dashboard", href: "/dashboard", icon: Home },
   { name: "Point of Sale", href: "/pos", icon: ShoppingCart },
   { name: "Inventory", href: "/inventory", icon: Package },
-  { name: "Alerts", href: "/alerts", icon: AlertTriangle },
+  { name: "Alerts", href: "/alerts", icon: Bell },
   { name: "Sales", href: "/sales", icon: Receipt },
-  { name: "Reports", href: "/reports", icon: PieChart },
-  { name: "Expenses", href: "/expenses", icon: CreditCard },
+  { name: "Expenses", href: "/expenses", icon: DollarSign },
+  {
+    name: "Reports",
+    href: "/reports",
+    icon: BarChart3,
+    subItems: [
+      { name: "Sales Reports", href: "/reports" },
+      { name: "Financial Reports", href: "/reports/finance" },
+      { name: "Financial Goals", href: "/reports/goals" },
+      { name: "Commissions", href: "/reports/commissions" },
+    ],
+  },
   { name: "User Management", href: "/users", icon: Users },
-  { name: "Settings", href: "/settings", icon: Settings },
 ]
 
-const cashierLinks = [
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+const cashierLinks: NavItem[] = [
+  { name: "Dashboard", href: "/dashboard", icon: Home },
   { name: "Point of Sale", href: "/pos", icon: ShoppingCart },
-  { name: "Alerts", href: "/alerts", icon: AlertTriangle },
+  { name: "Alerts", href: "/alerts", icon: Bell },
+  { name: "Expenses", href: "/expenses", icon: DollarSign },
 ]
 
 export function MainNav() {
   const pathname = usePathname()
-  const { profile } = useAuth()
-  const { isCollapsed, toggleSidebar } = useSidebar()
-  const { t } = useLanguage()
 
-  const links = profile?.role === "admin" ? adminLinks : cashierLinks
+  // Always call useAuth to prevent hook errors, and default to admin if not available
+  let auth
+  try {
+    auth = useAuth()
+  } catch (error) {
+    console.warn("Error accessing auth context:", error)
+    auth = { profile: { role: "admin" } }
+  }
+  const profile = auth?.profile
 
-  // Group links by category
-  const mainLinks = links.filter((link) => ["/dashboard", "/pos", "/alerts"].includes(link.href))
+  // Default to admin links if profile is not loaded yet
+  const links = profile?.role === "cashier" ? cashierLinks : adminLinks
 
-  const managementLinks = links.filter((link) =>
-    ["/inventory", "/sales", "/reports", "/expenses", "/users", "/settings"].includes(link.href),
-  )
-
-  const [lowStockCount, setLowStockCount] = useState(0)
-
-  useEffect(() => {
-    const fetchLowStockCount = async () => {
-      const { data } = await supabase.from("products").select("*")
-
-      // Filter products where stock is less than min_stock
-      const lowStock = data?.filter((product) => product.stock < product.min_stock) || []
-      setLowStockCount(lowStock.length)
-    }
-
-    fetchLowStockCount()
-  }, [])
-
-  // Translation map for sidebar items
-  const translateNavItem = (name: string) => {
-    const translations: Record<string, string> = {
-      Dashboard: t("dashboard"),
-      "Point of Sale": t("point.of.sale"),
-      Inventory: t("inventory"),
-      Alerts: t("alerts"),
-      Sales: t("sales"),
-      Reports: t("reports"),
-      Expenses: t("expenses"),
-      "User Management": t("user.management"),
-      Settings: t("settings"),
-      Main: t("main"),
-      Management: t("management"),
-      Collapse: t("collapse"),
-    }
-
-    return translations[name] || name
+  // Add support for showing subItems when on a subpage
+  const isActive = (href: string) => {
+    if (href === "/dashboard") return pathname === "/dashboard"
+    return pathname.startsWith(href)
   }
 
   return (
-    <div
-      className={cn(
-        "bg-sidebar h-screen border-r transition-all duration-300 ease-in-out",
-        isCollapsed ? "w-[60px]" : "w-[240px]",
-      )}
-    >
-      <div className="flex flex-col h-full">
-        <div className="flex-1 py-4 overflow-y-auto">
-          {/* Main section */}
-          <div className="space-y-1 px-3">
-            {!isCollapsed && (
-              <h2 className="px-2 text-xs font-semibold tracking-tight text-muted-foreground mb-2">
-                {translateNavItem("Main")}
-              </h2>
-            )}
-            <nav className="grid gap-1">
-              {mainLinks.map((link) => {
-                const Icon = link.icon
-                const isActive = pathname === link.href
+    <nav className="flex flex-col gap-2">
+      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-2">Menu</div>
+      {links.map((link) => {
+        const Icon = link.icon
+        const active = isActive(link.href)
 
-                return (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    className={cn(
-                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                      isActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                    )}
-                    title={isCollapsed ? translateNavItem(link.name) : undefined}
-                  >
-                    <Icon
-                      className={cn(
-                        "h-5 w-5 transition-colors",
-                        isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground",
-                      )}
-                    />
-                    {!isCollapsed && (
-                      <>
-                        <span>{translateNavItem(link.name)}</span>
-
-                        {link.href === "/alerts" && lowStockCount > 0 && (
-                          <Badge
-                            variant="outline"
-                            className="ml-auto bg-red-100 text-red-800 hover:bg-red-100 hover:text-red-800"
-                          >
-                            {lowStockCount}
-                          </Badge>
-                        )}
-                      </>
-                    )}
-                  </Link>
-                )
-              })}
-            </nav>
-          </div>
-
-          {/* Management section - only for admin */}
-          {profile?.role === "admin" && managementLinks.length > 0 && (
-            <div className="space-y-1 px-3 mt-6">
-              {!isCollapsed && (
-                <h2 className="px-2 text-xs font-semibold tracking-tight text-muted-foreground mb-2">
-                  {translateNavItem("Management")}
-                </h2>
+        return (
+          <div key={link.href} className="mb-1">
+            <Link
+              href={link.href}
+              className={cn(
+                "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all hover:bg-primary/10 hover:text-primary",
+                active ? "bg-primary/10 text-primary" : "text-gray-700 dark:text-gray-300",
               )}
-              <nav className="grid gap-1">
-                {managementLinks.map((link) => {
-                  const Icon = link.icon
-                  const isActive = pathname === link.href
+            >
+              <Icon className="h-4 w-4" />
+              {link.name}
+            </Link>
 
-                  return (
-                    <Link
-                      key={link.href}
-                      href={link.href}
-                      className={cn(
-                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        isActive
-                          ? "bg-primary/10 text-primary"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                      )}
-                      title={isCollapsed ? translateNavItem(link.name) : undefined}
-                    >
-                      <Icon
-                        className={cn(
-                          "h-5 w-5 transition-colors",
-                          isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground",
-                        )}
-                      />
-                      {!isCollapsed && <span>{translateNavItem(link.name)}</span>}
-                    </Link>
-                  )
-                })}
-              </nav>
-            </div>
-          )}
-        </div>
-
-        {/* Collapse button at the bottom */}
-        <div className="p-3 border-t">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={toggleSidebar}
-            className={cn(
-              "w-full flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground",
-              isCollapsed ? "px-2" : "",
+            {/* Render subItems if they exist and the parent is active */}
+            {link.subItems && active && (
+              <div className="ml-6 mt-1 space-y-1 border-l border-gray-200 dark:border-gray-700 pl-2">
+                {link.subItems.map((subItem) => (
+                  <Link
+                    key={subItem.href}
+                    href={subItem.href}
+                    className={cn(
+                      "flex items-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition-all hover:text-primary",
+                      pathname === subItem.href ? "text-primary" : "text-gray-600 dark:text-gray-400",
+                    )}
+                  >
+                    {subItem.name}
+                  </Link>
+                ))}
+              </div>
             )}
-          >
-            {isCollapsed ? (
-              <ChevronRight className="h-5 w-5" />
-            ) : (
-              <>
-                <ChevronLeft className="h-5 w-5" />
-                <span>{translateNavItem("Collapse")}</span>
-              </>
-            )}
-          </Button>
-        </div>
-      </div>
-    </div>
+          </div>
+        )
+      })}
+    </nav>
   )
 }
 

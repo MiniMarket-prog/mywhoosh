@@ -14,16 +14,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/components/ui/use-toast"
 import { useAuth } from "@/contexts/auth-context"
 import { supabase } from "@/lib/supabase"
-// Add the Edit icon import alongside Eye and Trash
-import { CalendarIcon, Edit, Eye, Trash, Minus, Plus, ShoppingBag, XCircle } from "lucide-react"
-import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { CalendarIcon, Edit, Eye, Trash, ShoppingCart } from "lucide-react"
+import { useEffect, useState, useCallback } from "react"
+import { Minus, Plus } from "lucide-react"
 import { format, subDays, startOfMonth, endOfMonth, startOfYear } from "date-fns"
 import type { DateRange } from "react-day-picker"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useRouter } from "next/navigation"
 
 type Sale = {
   id: string
@@ -44,6 +44,14 @@ type SaleItem = {
   subtotal: number
   product_name?: string
   original_quantity?: number
+  product?: {
+    id: string
+    name: string
+    barcode: string
+    price: number
+    stock: number
+    category: string
+  }
 }
 
 export default function SalesPage() {
@@ -56,7 +64,6 @@ export default function SalesPage() {
   const { profile } = useAuth()
   const { toast } = useToast()
   const router = useRouter()
-  // Add isEditDialogOpen state and editingItems state
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingItems, setEditingItems] = useState<SaleItem[]>([])
 
@@ -67,47 +74,8 @@ export default function SalesPage() {
   })
   const [predefinedRange, setPredefinedRange] = useState("30days")
 
-  useEffect(() => {
-    if (dateRange?.from && dateRange?.to) {
-      fetchSales()
-    }
-  }, [dateRange])
-
-  const handlePredefinedRangeChange = (value: string) => {
-    setPredefinedRange(value)
-
-    const today = new Date()
-    let from: Date
-    let to: Date = today
-
-    switch (value) {
-      case "7days":
-        from = subDays(today, 7)
-        break
-      case "30days":
-        from = subDays(today, 30)
-        break
-      case "thisMonth":
-        from = startOfMonth(today)
-        break
-      case "lastMonth":
-        to = endOfMonth(subDays(startOfMonth(today), 1))
-        from = startOfMonth(to)
-        break
-      case "thisYear":
-        from = startOfYear(today)
-        break
-      case "all":
-        from = new Date(0) // Beginning of time
-        break
-      default:
-        from = subDays(today, 30)
-    }
-
-    setDateRange({ from, to })
-  }
-
-  const fetchSales = async () => {
+  // Fix the useEffect dependency array by adding fetchSales
+  const fetchSales = useCallback(async () => {
     setIsLoading(true)
 
     let query = supabase.from("sales").select("*").order("created_at", { ascending: false })
@@ -149,6 +117,46 @@ export default function SalesPage() {
     }
 
     setIsLoading(false)
+  }, [dateRange, predefinedRange, toast])
+
+  useEffect(() => {
+    if (dateRange?.from && dateRange?.to) {
+      fetchSales()
+    }
+  }, [dateRange, fetchSales])
+
+  const handlePredefinedRangeChange = (value: string) => {
+    setPredefinedRange(value)
+
+    const today = new Date()
+    let from: Date
+    let to: Date = today
+
+    switch (value) {
+      case "7days":
+        from = subDays(today, 7)
+        break
+      case "30days":
+        from = subDays(today, 30)
+        break
+      case "thisMonth":
+        from = startOfMonth(today)
+        break
+      case "lastMonth":
+        to = endOfMonth(subDays(startOfMonth(today), 1))
+        from = startOfMonth(to)
+        break
+      case "thisYear":
+        from = startOfYear(today)
+        break
+      case "all":
+        from = new Date(0) // Beginning of time
+        break
+      default:
+        from = subDays(today, 30)
+    }
+
+    setDateRange({ from, to })
   }
 
   const fetchSaleItems = async (saleId: string) => {
@@ -167,15 +175,12 @@ export default function SalesPage() {
       // Get product names
       const itemsWithProductNames = await Promise.all(
         (data || []).map(async (item) => {
-          const { data: productData } = await supabase
-            .from("products")
-            .select("name")
-            .eq("id", item.product_id)
-            .single()
+          const { data: productData } = await supabase.from("products").select("*").eq("id", item.product_id).single()
 
           return {
             ...item,
             product_name: productData?.name || "Unknown Product",
+            product: productData || undefined,
           }
         }),
       )
@@ -215,16 +220,13 @@ export default function SalesPage() {
     // Get product names and current stock
     const itemsWithDetails = await Promise.all(
       (data || []).map(async (item) => {
-        const { data: productData } = await supabase
-          .from("products")
-          .select("name, stock")
-          .eq("id", item.product_id)
-          .single()
+        const { data: productData } = await supabase.from("products").select("*").eq("id", item.product_id).single()
 
         return {
           ...item,
           product_name: productData?.name || "Unknown Product",
           original_quantity: item.quantity, // Store original quantity for stock calculations
+          product: productData || undefined,
         }
       }),
     )
@@ -250,14 +252,30 @@ export default function SalesPage() {
     )
   }
 
-  // Add removeItemFromSale function
-  const removeItemFromSale = (itemId: string) => {
-    setEditingItems((prevItems) => prevItems.filter((item) => item.id !== itemId))
-  }
-
   // Add calculateEditedTotal function
   const calculateEditedTotal = () => {
     return editingItems.reduce((total, item) => total + item.subtotal, 0)
+  }
+
+  // Add handleDeleteItem function to remove an item from a sale
+  const handleDeleteItem = async (itemId: string) => {
+    // Find the item to be deleted
+    const itemToDelete = editingItems.find((item) => item.id === itemId)
+
+    if (!itemToDelete) return
+
+    // Ask for confirmation
+    if (!confirm(`Are you sure you want to remove ${itemToDelete.product_name} from this sale?`)) {
+      return
+    }
+
+    // Remove the item from the editing items array
+    setEditingItems((prevItems) => prevItems.filter((item) => item.id !== itemId))
+
+    toast({
+      title: "Item removed",
+      description: `${itemToDelete.product_name} has been removed from the sale`,
+    })
   }
 
   // Add handleSaveEdit function
@@ -273,13 +291,14 @@ export default function SalesPage() {
 
       if (originalItemsError) throw originalItemsError
 
-      // Find removed items (items in original but not in editingItems)
-      const removedItems = originalItems.filter(
+      // Find deleted items (items in originalItems but not in editingItems)
+      const deletedItems = originalItems.filter(
         (originalItem) => !editingItems.some((editItem) => editItem.id === originalItem.id),
       )
 
-      // Restore stock for removed items
-      for (const item of removedItems) {
+      // Delete removed items from the database
+      for (const item of deletedItems) {
+        // Restore stock for deleted items
         const { error: stockError } = await supabase.rpc("increment_stock", {
           product_id: item.product_id,
           quantity: item.quantity,
@@ -287,15 +306,16 @@ export default function SalesPage() {
 
         if (stockError) throw stockError
 
-        // Delete the removed item
-        const { error: deleteItemError } = await supabase.from("sale_items").delete().eq("id", item.id)
+        // Delete the item from sale_items
+        const { error: deleteError } = await supabase.from("sale_items").delete().eq("id", item.id)
 
-        if (deleteItemError) throw deleteItemError
+        if (deleteError) throw deleteError
       }
 
       // Update stock for each product based on quantity changes
       for (const item of editingItems) {
         const originalItem = originalItems.find((i) => i.id === item.id)
+
         if (originalItem) {
           const quantityDifference = originalItem.quantity - item.quantity
 
@@ -338,11 +358,12 @@ export default function SalesPage() {
 
       setIsEditDialogOpen(false)
       fetchSales()
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to update sale"
       console.error("Error updating sale:", error)
       toast({
         title: "Error",
-        description: error.message || "Failed to update sale",
+        description: errorMessage,
         variant: "destructive",
       })
     }
@@ -383,30 +404,67 @@ export default function SalesPage() {
       })
 
       fetchSales()
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to delete sale"
       console.error("Error deleting sale:", error)
       toast({
         title: "Error",
-        description: error.message || "Failed to delete sale",
+        description: errorMessage,
         variant: "destructive",
       })
     }
   }
 
-  // Update the openInPOS function to include the sale ID
-  const openInPOS = (sale: Sale) => {
-    // Store the sale data in localStorage to be accessed by the POS page
-    localStorage.setItem(
-      "pendingSale",
-      JSON.stringify({
-        id: sale.id,
-        items: saleItems,
-        payment_method: sale.payment_method,
-      }),
-    )
+  // Add function to continue sale in POS with proper typing
+  const handleContinueInPOS = async (sale: Sale) => {
+    try {
+      // Directly fetch and use the items without depending on state
+      const { data, error } = await supabase.from("sale_items").select("*").eq("sale_id", sale.id)
 
-    // Navigate to the POS page
-    router.push("/pos")
+      if (error) throw error
+
+      // Get product details for each item
+      const itemsWithDetails = await Promise.all(
+        (data || []).map(async (item) => {
+          const { data: productData } = await supabase.from("products").select("*").eq("id", item.product_id).single()
+
+          return {
+            ...item,
+            product_name: productData?.name || "Unknown Product",
+            product: productData || undefined,
+          }
+        }),
+      )
+
+      // Store the sale data in localStorage to be accessed by the POS page
+      const saleData = {
+        id: sale.id,
+        items: itemsWithDetails.map((item) => ({
+          product: item.product,
+          quantity: item.quantity,
+          subtotal: item.subtotal,
+        })),
+        payment_method: sale.payment_method,
+      }
+
+      localStorage.setItem("continue_sale", JSON.stringify(saleData))
+
+      // Navigate to the POS page
+      toast({
+        title: "Opening in POS",
+        description: "Sale is being loaded in the POS page",
+      })
+
+      router.push("/pos")
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to continue sale in POS"
+      console.error("Error continuing sale in POS:", error)
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    }
   }
 
   const formatDate = (dateString: string) => {
@@ -516,12 +574,21 @@ export default function SalesPage() {
                     <TableCell>{sale.cashier_name}</TableCell>
                     <TableCell className="capitalize">{sale.payment_method}</TableCell>
                     <TableCell className="text-right font-medium">${sale.total.toFixed(2)}</TableCell>
-                    {/* Update the actions cell in the table to include Edit button */}
+                    {/* Update the actions cell in the table to include Continue in POS button */}
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
                         <Button variant="ghost" size="icon" onClick={() => handleViewSale(sale)}>
                           <Eye className="h-4 w-4" />
                           <span className="sr-only">View</span>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleContinueInPOS(sale)}
+                          title="Continue in POS"
+                        >
+                          <ShoppingCart className="h-4 w-4" />
+                          <span className="sr-only">Continue in POS</span>
                         </Button>
                         {profile?.role === "admin" && (
                           <>
@@ -626,16 +693,18 @@ export default function SalesPage() {
             </div>
           </div>
           <DialogFooter>
+            {/* Add Continue in POS button in the dialog footer */}
             {selectedSale && (
               <Button
                 variant="outline"
                 onClick={() => {
+                  handleContinueInPOS(selectedSale)
                   setIsViewDialogOpen(false)
-                  openInPOS(selectedSale)
                 }}
+                className="mr-auto"
               >
-                <ShoppingBag className="mr-2 h-4 w-4" />
-                Open in POS
+                <ShoppingCart className="mr-2 h-4 w-4" />
+                Continue in POS
               </Button>
             )}
             <Button onClick={() => setIsViewDialogOpen(false)}>Close</Button>
@@ -686,12 +755,13 @@ export default function SalesPage() {
                     <TableHead className="text-right">Price</TableHead>
                     <TableHead className="text-right">Quantity</TableHead>
                     <TableHead className="text-right">Subtotal</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoadingItems ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center py-4">
+                      <TableCell colSpan={5} className="text-center py-4">
                         Loading items...
                       </TableCell>
                     </TableRow>
@@ -719,22 +789,24 @@ export default function SalesPage() {
                             >
                               <Plus className="h-3 w-3" />
                             </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 text-destructive"
-                              onClick={() => removeItemFromSale(item.id)}
-                            >
-                              <XCircle className="h-3 w-3" />
-                            </Button>
                           </div>
                         </TableCell>
                         <TableCell className="text-right font-medium">${item.subtotal.toFixed(2)}</TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-destructive"
+                            onClick={() => handleDeleteItem(item.id)}
+                          >
+                            <Trash className="h-3 w-3" />
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center py-4">
+                      <TableCell colSpan={5} className="text-center py-4">
                         No items found for this sale
                       </TableCell>
                     </TableRow>
@@ -744,6 +816,20 @@ export default function SalesPage() {
             </div>
           </div>
           <DialogFooter>
+            {/* Add Continue in POS button in the edit dialog footer */}
+            {selectedSale && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  handleContinueInPOS(selectedSale)
+                  setIsEditDialogOpen(false)
+                }}
+                className="mr-auto"
+              >
+                <ShoppingCart className="mr-2 h-4 w-4" />
+                Continue in POS
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
               Cancel
             </Button>
