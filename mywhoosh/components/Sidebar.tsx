@@ -6,8 +6,22 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/contexts/auth-context"
-import { Home, ShoppingCart, Package, Bell, Receipt, DollarSign, BarChart3, Users, ChevronDown } from "lucide-react"
-import { useState } from "react"
+import {
+  Home,
+  ShoppingCart,
+  Package,
+  Bell,
+  Receipt,
+  DollarSign,
+  BarChart3,
+  Users,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Settings,
+  Database,
+} from "lucide-react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 
 type NavItem = {
@@ -21,9 +35,26 @@ export function Sidebar() {
   const pathname = usePathname()
   const { profile } = useAuth()
   const [openSubmenu, setOpenSubmenu] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState(false)
+
+  // Check for saved collapsed state in localStorage
+  useEffect(() => {
+    const savedState = localStorage.getItem("sidebar-collapsed")
+    if (savedState) {
+      setCollapsed(savedState === "true")
+    }
+  }, [])
+
+  // Save collapsed state to localStorage
+  const toggleCollapsed = () => {
+    const newState = !collapsed
+    setCollapsed(newState)
+    localStorage.setItem("sidebar-collapsed", String(newState))
+  }
 
   const isAdmin = profile?.role === "admin"
 
+  // Define links with Settings for both admin and cashier
   const adminLinks: NavItem[] = [
     { name: "Dashboard", href: "/dashboard", icon: Home },
     { name: "Point of Sale", href: "/pos", icon: ShoppingCart },
@@ -43,6 +74,8 @@ export function Sidebar() {
       ],
     },
     { name: "User Management", href: "/users", icon: Users },
+    { name: "Settings", href: "/settings", icon: Settings },
+    { name: "Setup", href: "/setup", icon: Database }, // Added Setup link for admin
   ]
 
   const cashierLinks: NavItem[] = [
@@ -50,8 +83,10 @@ export function Sidebar() {
     { name: "Point of Sale", href: "/pos", icon: ShoppingCart },
     { name: "Alerts", href: "/alerts", icon: Bell },
     { name: "Expenses", href: "/expenses", icon: DollarSign },
+    { name: "Settings", href: "/settings", icon: Settings },
   ]
 
+  // Use the appropriate links array based on user role
   const links = isAdmin ? adminLinks : cashierLinks
 
   const toggleSubmenu = (name: string) => {
@@ -63,9 +98,38 @@ export function Sidebar() {
   }
 
   return (
-    <div className="w-64 min-h-screen bg-background border-r">
+    <div
+      className={cn(
+        "min-h-screen bg-background border-r transition-all duration-300 relative",
+        collapsed ? "w-20" : "w-64",
+      )}
+    >
+      {/* Collapse toggle button */}
+      <button
+        onClick={toggleCollapsed}
+        className="absolute -right-3 top-20 bg-background border border-border rounded-full p-1 shadow-md z-10 hover:bg-muted"
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      >
+        {collapsed ? (
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        ) : (
+          <ChevronLeft className="h-4 w-4 text-muted-foreground" />
+        )}
+      </button>
+
       <div className="p-4">
-        <h2 className="text-xl font-bold mb-6">Mini Market</h2>
+        <div className="flex items-center justify-between mb-6">
+          {!collapsed ? (
+            <h2 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-blue-600">
+              Mini Market
+            </h2>
+          ) : (
+            <div className="w-full flex justify-center">
+              <span className="text-xl font-bold text-primary">M</span>
+            </div>
+          )}
+        </div>
+
         <nav className="space-y-1">
           {links.map((link) => (
             <div key={link.name}>
@@ -76,20 +140,32 @@ export function Sidebar() {
                     className={cn(
                       "w-full justify-start text-left font-normal",
                       pathname.startsWith(link.href) ? "bg-muted" : "",
+                      collapsed ? "px-3 justify-center" : "",
                     )}
-                    onClick={() => toggleSubmenu(link.name)}
+                    onClick={() => !collapsed && toggleSubmenu(link.name)}
                   >
-                    <link.icon className="mr-2 h-4 w-4" />
-                    {link.name}
-                    <ChevronDown
+                    <link.icon
                       className={cn(
-                        "ml-auto h-4 w-4 transition-transform",
-                        openSubmenu === link.name ? "transform rotate-180" : "",
+                        "h-4 w-4",
+                        collapsed ? "" : "mr-2",
+                        pathname.startsWith(link.href) ? "text-primary" : "text-muted-foreground",
                       )}
                     />
+
+                    {!collapsed && (
+                      <>
+                        {link.name}
+                        <ChevronDown
+                          className={cn(
+                            "ml-auto h-4 w-4 transition-transform",
+                            openSubmenu === link.name ? "transform rotate-180" : "",
+                          )}
+                        />
+                      </>
+                    )}
                   </Button>
 
-                  {openSubmenu === link.name && (
+                  {openSubmenu === link.name && !collapsed && (
                     <div className="ml-6 mt-1 space-y-1">
                       {link.subItems.map((subItem) => (
                         <Link
@@ -116,10 +192,13 @@ export function Sidebar() {
                     pathname === link.href
                       ? "bg-muted text-foreground"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                    collapsed ? "justify-center" : "",
                   )}
                 >
-                  <link.icon className="mr-2 h-4 w-4" />
-                  {link.name}
+                  <link.icon
+                    className={cn("h-4 w-4", collapsed ? "" : "mr-2", pathname === link.href ? "text-primary" : "")}
+                  />
+                  {!collapsed && link.name}
                 </Link>
               )}
             </div>

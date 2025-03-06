@@ -89,12 +89,7 @@ export function UserNav() {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={(e) => {
-            e.preventDefault()
-            handleSignOut()
-          }}
-        >
+        <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer">
           Log out
         </DropdownMenuItem>
       </DropdownMenuContent>

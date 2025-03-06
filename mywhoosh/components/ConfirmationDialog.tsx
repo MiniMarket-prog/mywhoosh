@@ -1,8 +1,15 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { AlertCircle } from "lucide-react"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 
 interface ConfirmationDialogProps {
   isOpen: boolean
@@ -25,51 +32,34 @@ export function ConfirmationDialog({
   cancelText = "Cancel",
   variant = "default",
 }: ConfirmationDialogProps) {
-  const [isVisible, setIsVisible] = useState(false)
-
-  useEffect(() => {
-    if (isOpen) {
-      setIsVisible(true)
-    } else {
-      const timer = setTimeout(() => {
-        setIsVisible(false)
-      }, 200)
-      return () => clearTimeout(timer)
-    }
-  }, [isOpen])
-
-  if (!isVisible) return null
+  const handleConfirm = () => {
+    onConfirm()
+    onClose()
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-md p-4">
-        <Card className={`w-full ${isOpen ? "animate-in fade-in zoom-in-95" : "animate-out fade-out zoom-out-95"}`}>
-          <CardHeader>
-            <CardTitle>{title}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">{description}</p>
-            {variant === "destructive" && (
-              <p className="mt-2 text-sm font-semibold text-destructive">Warning: This action cannot be undone!</p>
-            )}
-          </CardContent>
-          <CardFooter className="flex justify-end gap-2">
-            <Button variant="outline" onClick={onClose}>
-              {cancelText}
-            </Button>
-            <Button
-              variant={variant === "destructive" ? "destructive" : "default"}
-              onClick={() => {
-                onConfirm()
-                onClose()
-              }}
-            >
-              {confirmText}
-            </Button>
-          </CardFooter>
-        </Card>
-      </div>
-    </div>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            {variant === "destructive" && <AlertCircle className="h-5 w-5 text-destructive" />}
+            {title}
+          </DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+          {variant === "destructive" && (
+            <p className="mt-2 text-sm font-semibold text-destructive">Warning: This action cannot be undone!</p>
+          )}
+        </DialogHeader>
+        <DialogFooter className="flex justify-end gap-2 sm:justify-end">
+          <Button variant="outline" onClick={onClose}>
+            {cancelText}
+          </Button>
+          <Button variant={variant === "destructive" ? "destructive" : "default"} onClick={handleConfirm}>
+            {confirmText}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
