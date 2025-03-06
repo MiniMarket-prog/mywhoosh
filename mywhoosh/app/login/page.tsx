@@ -8,19 +8,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-
-const signIn = async (email: string, password: string) => {
-  // Placeholder for actual sign-in logic
-  return new Promise((resolve, reject) => {
-    setTimeout(() => {
-      if (email === "test@example.com" && password === "password") {
-        resolve({ success: true })
-      } else {
-        reject(new Error("Invalid email or password"))
-      }
-    }, 1000)
-  })
-}
+import { supabase } from "@/lib/supabase"
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
@@ -34,9 +22,24 @@ export default function LoginPage() {
     setIsLoading(true)
 
     try {
-      await signIn(email, password)
+      // Use Supabase authentication
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
+
+      if (error) {
+        throw error
+      }
+
       // If we reach here, sign in was successful
-      router.push("/dashboard")
+      toast({
+        title: "Success",
+        description: "You have been logged in successfully",
+      })
+
+      // Force a hard navigation to ensure auth context is refreshed
+      window.location.href = "/dashboard"
     } catch (error: any) {
       console.error("Login error:", error)
       toast({
@@ -50,8 +53,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center h-screen">
-      <div className="w-full max-w-md p-6 border rounded-lg shadow-md">
+    <div className="flex flex-col items-center justify-center min-h-screen p-4">
+      <div className="w-full max-w-md p-6 border rounded-lg shadow-md bg-card">
         <h1 className="text-3xl font-semibold text-center mb-6">Login</h1>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -82,6 +85,13 @@ export default function LoginPage() {
             {isLoading ? "Logging in..." : "Login"}
           </Button>
         </form>
+
+        {/* For development/testing purposes */}
+        <div className="mt-4 text-center text-sm text-muted-foreground">
+          <p>For testing, use:</p>
+          <p>Email: test@example.com</p>
+          <p>Password: password</p>
+        </div>
       </div>
     </div>
   )

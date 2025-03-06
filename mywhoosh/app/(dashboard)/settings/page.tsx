@@ -303,8 +303,8 @@ export default function SettingsPage() {
     <div className="space-y-6" dir={dir}>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">{t("settings.title")}</h1>
-          <p className="text-muted-foreground">{t("settings.subtitle")}</p>
+          <h1 className="text-3xl font-bold tracking-tight">{t("settings")}</h1>
+          <p className="text-muted-foreground">{t("settings")}</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleResetSettings} disabled={isProcessing}>
@@ -331,23 +331,23 @@ export default function SettingsPage() {
         <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="general">
             <Building className="mr-2 h-4 w-4" />
-            {t("settings.tab.general")}
+            {t("general")}
           </TabsTrigger>
           <TabsTrigger value="receipt">
             <Receipt className="mr-2 h-4 w-4" />
-            {t("settings.tab.receipt")}
+            {t("receipt")}
           </TabsTrigger>
           <TabsTrigger value="tax">
             <Percent className="mr-2 h-4 w-4" />
-            {t("settings.tab.tax")}
+            {t("tax")}
           </TabsTrigger>
           <TabsTrigger value="preferences">
             <User className="mr-2 h-4 w-4" />
-            {t("settings.tab.preferences")}
+            {t("preferences")}
           </TabsTrigger>
           <TabsTrigger value="backup" disabled={!isAdmin}>
             <Database className="mr-2 h-4 w-4" />
-            {t("settings.tab.backup")}
+            {t("backup")}
           </TabsTrigger>
         </TabsList>
 
@@ -355,13 +355,13 @@ export default function SettingsPage() {
         <TabsContent value="general">
           <Card>
             <CardHeader>
-              <CardTitle>{t("settings.general.title")}</CardTitle>
-              <CardDescription>{t("settings.general.description")}</CardDescription>
+              <CardTitle>{t("title")}</CardTitle>
+              <CardDescription>{t("description")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="storeName">{t("settings.general.storeName")}</Label>
+                  <Label htmlFor="storeName">{t("storeName")}</Label>
                   <Input
                     id="storeName"
                     name="storeName"
@@ -370,7 +370,7 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="currency">{t("settings.general.currency")}</Label>
+                  <Label htmlFor="currency">{t("currency")}</Label>
                   <Select
                     value={settings.general.currency}
                     onValueChange={(value) => {
@@ -398,7 +398,7 @@ export default function SettingsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="address">{t("settings.general.address")}</Label>
+                <Label htmlFor="address">{t("address")}</Label>
                 <Textarea
                   id="address"
                   name="address"
@@ -410,11 +410,11 @@ export default function SettingsPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="phone">{t("settings.general.phone")}</Label>
+                  <Label htmlFor="phone">{t("phone")}</Label>
                   <Input id="phone" name="phone" value={settings.general.phone} onChange={handleGeneralChange} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="email">{t("settings.general.email")}</Label>
+                  <Label htmlFor="email">{t("email")}</Label>
                   <Input id="email" name="email" value={settings.general.email} onChange={handleGeneralChange} />
                 </div>
               </div>
@@ -605,18 +605,18 @@ export default function SettingsPage() {
                       <SelectItem value="en">
                         <div className="flex items-center">
                           <Globe className="mr-2 h-4 w-4" />
-                          {t("language.english")}
+                          {t("english")}
                         </div>
                       </SelectItem>
                       <SelectItem value="ar">
                         <div className="flex items-center">
                           <Globe className="mr-2 h-4 w-4" />
-                          {t("language.arabic")}
+                          {t("arabic")}
                         </div>
                       </SelectItem>
-                      <SelectItem value="es">{t("language.spanish")}</SelectItem>
-                      <SelectItem value="fr">{t("language.french")}</SelectItem>
-                      <SelectItem value="de">{t("language.german")}</SelectItem>
+                      <SelectItem value="es">{t("spanish")}</SelectItem>
+                      <SelectItem value="fr">{t("french")}</SelectItem>
+                      <SelectItem value="de">{t("german")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

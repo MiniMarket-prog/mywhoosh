@@ -1,159 +1,153 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/contexts/auth-context"
 import { supabase } from "@/lib/supabase"
 import { BarChart3, DollarSign, Package, ShoppingCart } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useLanguage } from "@/contexts/language-context"
+
+interface DashboardData {
+  totalRevenue: number
+  totalSales?: number
+  totalProducts?: number
+  totalExpenses?: number
+}
 
 export default function DashboardPage() {
   const { profile } = useAuth()
+  const { t } = useLanguage()
   const [isLoading, setIsLoading] = useState(true)
   const [currency, setCurrency] = useState("MAD")
   const [dashboardData, setDashboardData] = useState<DashboardData>({
     totalRevenue: 0,
+    totalSales: 0,
+    totalProducts: 0,
+    totalExpenses: 0,
   })
-  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
     const fetchStats = async () => {
-      setIsLoading(true)
+      try {
+        // Simulate API call with a delay
+        await new Promise((resolve) => setTimeout(resolve, 1000))
 
-      // Get total products
-      const { count: totalProducts } = await supabase.from("products").select("*", { count: "exact", head: true })
+        // Fetch products count
+        const { count: productsCount } = await supabase.from("products").select("*", { count: "exact", head: true })
 
-      // Get low stock products
-      const { count: lowStockCount } = await supabase
-        .from("products")
-        .select("*", { count: "exact", head: true })
-        .lt("stock", 10)
+        // Fetch sales data
+        const { data: sales } = await supabase.from("sales").select("*")
 
-      // Get total sales
-      const { count: totalSales } = await supabase.from("sales").select("*", { count: "exact", head: true })
+        // Calculate total revenue and sales count
+        let totalRevenue = 0
+        if (sales) {
+          totalRevenue = sales.reduce((sum, sale) => sum + (sale.total || 0), 0)
+        }
 
-      // Get total revenue
-      const { data: salesData } = await supabase.from("sales").select("total")
+        // Fetch expenses data
+        const { data: expenses } = await supabase.from("expenses").select("*")
 
-      const totalRevenue = salesData?.reduce((sum, sale) => sum + sale.total, 0) || 0
+        // Calculate total expenses
+        let totalExpenses = 0
+        if (expenses) {
+          totalExpenses = expenses.reduce((sum, expense) => sum + (expense.amount || 0), 0)
+        }
 
-      setStats({
-        totalProducts: totalProducts || 0,
-        lowStockCount: lowStockCount || 0,
-        totalSales: totalSales || 0,
-        totalRevenue,
-      })
-
-      setIsLoading(false)
+        setDashboardData({
+          totalRevenue,
+          totalSales: sales?.length || 0,
+          totalProducts: productsCount || 0,
+          totalExpenses,
+        })
+      } catch (error) {
+        console.error("Error fetching dashboard data:", error)
+      } finally {
+        setIsLoading(false)
+      }
     }
+
+    fetchStats()
   }, [])
 
+  const formatCurrency = useCallback(
+    (value: number) => {
+      return new Intl.NumberFormat("fr-MA", {
+        style: "currency",
+        currency: currency,
+      }).format(value)
+    },
+    [currency],
+  )
+
+  if (isLoading) {
+    return (
+      <div className="flex h-[200px] items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+      </div>
+    )
+  }
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground">Welcome back, {profile?.full_name || profile?.username}!</p>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">TOTAL PRODUCT COST</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {isLoading ? (
-                <div className="h-8 w-24 animate-pulse rounded bg-muted"></div>
-              ) : (
-                `$${stats.totalRevenue.toFixed(2)}`
-              )}
-            </div>
-            <div className="flex items-center text-xs text-muted-foreground mt-1">
-              <span className="text-green-500 flex items-center mr-1">
-                <ArrowUpRight className="h-3 w-3 mr-0.5" />
-                2.5%
-              </span>
-              vs. previous month
-            </div>
-            {!isLoading && (
-              <div className="mt-3 h-1 w-full bg-muted overflow-hidden rounded-full">
-                <div className="bg-blue-500 h-1 w-3/4 rounded-full"></div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Sales</CardTitle>
-            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {isLoading ? <div className="h-8 w-16 animate-pulse rounded bg-muted"></div> : stats.totalSales}
-            </div>
-            {!isLoading && (
-              <div className="mt-3 h-1 w-full bg-muted overflow-hidden rounded-full">
-                <div className="bg-green-500 h-1 w-4/5 rounded-full"></div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Products</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">+{dashboardData.activeCustomers}</div>
-            <div className="flex items-center text-xs text-green-500 mt-1">
-              <ArrowUpRight className="h-3 w-3 mr-1" />
-              <span>+{dashboardData.customersChange}% from last month</span>
-            </div>
-            <div className="flex items-center text-xs text-muted-foreground mt-1">
-              <span className="text-green-500 flex items-center mr-1">
-                <ArrowUpRight className="h-3 w-3 mr-0.5" />
-                1.8%
-              </span>
-              vs. previous month
-            </div>
-            {!isLoading && (
-              <div className="mt-3 h-1 w-full bg-muted overflow-hidden rounded-full">
-                <div className="bg-purple-500 h-1 w-2/3 rounded-full"></div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Low Stock Items</CardTitle>
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{dashboardData.inventoryItems}</div>
-            <div className="flex items-center text-xs text-red-500 mt-1">
-              <ArrowDownRight className="h-3 w-3 mr-1" />
-              <span>{dashboardData.inventoryChange}% from last month</span>
-            </div>
-            <div className="flex items-center text-xs text-muted-foreground mt-1">
-              <span className="text-red-500 flex items-center mr-1">
-                <ArrowDownRight className="h-3 w-3 mr-0.5" />
-                3.1%
-              </span>
-              vs. previous month
-            </div>
-            {!isLoading && (
-              <div className="mt-3 h-1 w-full bg-muted overflow-hidden rounded-full">
-                <div className="bg-amber-500 h-1 w-1/2 rounded-full"></div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+    <div className="flex flex-col gap-5">
+      <h1 className="text-3xl font-bold tracking-tight">{t("dashboard")}</h1>
+      <Tabs defaultValue="overview" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="overview">{t("overview")}</TabsTrigger>
+          <TabsTrigger value="analytics">{t("analytics")}</TabsTrigger>
+          <TabsTrigger value="reports">{t("reports")}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="overview" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{t("total.revenue")}</CardTitle>
+                <DollarSign className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{formatCurrency(dashboardData.totalRevenue)}</div>
+                <p className="text-xs text-muted-foreground">+20.1% {t("from.last.month")}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{t("sales")}</CardTitle>
+                <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{dashboardData.totalSales}</div>
+                <p className="text-xs text-muted-foreground">+15% {t("from.last.month")}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{t("products")}</CardTitle>
+                <Package className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{dashboardData.totalProducts}</div>
+                <p className="text-xs text-muted-foreground">+12 {t("new.products")}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{t("expenses")}</CardTitle>
+                <BarChart3 className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{formatCurrency(dashboardData.totalExpenses || 0)}</div>
+                <p className="text-xs text-muted-foreground">+7% {t("from.last.month")}</p>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+        <TabsContent value="analytics" className="h-[400px] flex items-center justify-center bg-muted/50 rounded-md">
+          <p className="text-muted-foreground">{t("analytics.coming.soon")}</p>
+        </TabsContent>
+        <TabsContent value="reports" className="h-[400px] flex items-center justify-center bg-muted/50 rounded-md">
+          <p className="text-muted-foreground">{t("reports.coming.soon")}</p>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
