@@ -51,3 +51,18 @@ export interface Expense {
   updated_at?: string
 }
 
+// Add the missing Goal interface
+export interface Goal {
+  id: string
+  title: string
+  description?: string
+  target: number
+  current: number
+  category: string
+  start_date: string
+  end_date: string
+  created_by: string
+  created_at?: string
+  updated_at?: string
+}
+
