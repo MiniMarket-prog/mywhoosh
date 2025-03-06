@@ -1,49 +1,95 @@
 "use client"
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { useAuth } from "@/contexts/auth-context"
+import type React from "react"
 
-export function UserNav() {
-  const { profile, signOut } = useAuth()
+import { createContext, useContext, useEffect, useState } from "react"
+import { supabase } from "@/lib/supabase"
+import type { User } from "@supabase/supabase-js"
 
-  const initials = profile?.full_name
-    ? profile.full_name
-        .split(" ")
-        .map((n) => n[0])
-        .join("")
-    : profile?.username?.substring(0, 2) || "U"
+// Define the UserProfile type to match what's in your database
+export type UserProfile = {
+  id: string
+  email: string
+  username?: string
+  avatar_url?: string
+  role?: string
+  // Add any other fields that exist in your profiles table
+}
 
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-          <Avatar className="h-8 w-8">
-            <AvatarFallback>{initials}</AvatarFallback>
-          </Avatar>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-56" align="end" forceMount>
-        <DropdownMenuLabel className="font-normal">
-          <div className="flex flex-col space-y-1">
-            <p className="text-sm font-medium leading-none">{profile?.full_name || profile?.username}</p>
-            <p className="text-xs leading-none text-muted-foreground">
-              {profile?.role ? `${profile.role.charAt(0).toUpperCase()}${profile.role.slice(1)}` : "User"}
-            </p>
-          </div>
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => signOut()}>Log out</DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
+type AuthContextType = {
+  user: User | null
+  profile: UserProfile | null
+  isLoading: boolean
+  signOut: () => Promise<void>
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined)
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null)
+  const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    // Set up auth state listener
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      setUser(session?.user || null)
+      if (session?.user) {
+        await fetchProfile(session.user.id)
+      } else {
+        setProfile(null)
+      }
+      setIsLoading(false)
+    })
+
+    // Get initial session
+    const initializeAuth = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      setUser(session?.user || null)
+      if (session?.user) {
+        await fetchProfile(session.user.id)
+      }
+      setIsLoading(false)
+    }
+
+    initializeAuth()
+
+    return () => {
+      authListener.subscription.unsubscribe()
+    }
+  }, [])
+
+  const fetchProfile = async (userId: string) => {
+    try {
+      const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).single()
+
+      if (error) {
+        throw error
+      }
+
+      setProfile(data)
+    } catch (error) {
+      console.error("Error fetching profile:", error)
+      setProfile(null)
+    }
+  }
+
+  const signOut = async () => {
+    await supabase.auth.signOut()
+    setUser(null)
+    setProfile(null)
+  }
+
+  return <AuthContext.Provider value={{ user, profile, isLoading, signOut }}>{children}</AuthContext.Provider>
+}
+
+export const useAuth = () => {
+  const context = useContext(AuthContext)
+  if (context === undefined) {
+    throw new Error("useAuth must be used within an AuthProvider")
+  }
+  return context
 }
 
