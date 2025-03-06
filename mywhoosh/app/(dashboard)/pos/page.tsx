@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase"
 import {
+  AlertTriangle,
   Barcode,
   Minus,
   Plus,
@@ -41,6 +42,7 @@ type Product = {
   price: number
   stock: number
   category: string
+  min_stock: number // Add this property (not optional)
 }
 
 type CartItem = {
@@ -73,10 +75,24 @@ export default function POSPage() {
   } | null>(null)
   const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false)
   const [quickAmounts, setQuickAmounts] = useState<number[]>([5, 10, 20, 50, 100])
+  const [isPendingSaleLoaded, setIsPendingSaleLoaded] = useState(false)
+  // Add a state to track if we're editing an existing sale
+  const [editingSaleId, setEditingSaleId] = useState<string | null>(null)
+  // Add this new state for low stock products after the other state declarations
+  const [lowStockProducts, setLowStockProducts] = useState<Product[]>([])
+  const [isLowStockDialogOpen, setIsLowStockDialogOpen] = useState(false)
+  const [isStockAdjustmentDialogOpen, setIsStockAdjustmentDialogOpen] = useState(false)
+  const [adjustingProduct, setAdjustingProduct] = useState<Product | null>(null)
+  const [newStockAmount, setNewStockAmount] = useState("")
+
+  const handleCheckoutRef = useRef<() => void>(() => {})
+  const handleVoidLastItemRef = useRef<() => void>(() => {})
+  const handleRepeatLastSaleRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     fetchProducts()
     fetchRecentProducts()
+    fetchLowStockProducts() // Add this line
 
     // Focus the barcode input on page load
     if (barcodeInputRef.current) {
@@ -117,31 +133,63 @@ export default function POSPage() {
   }
 
   const fetchRecentProducts = async () => {
-    // Get the 10 most recently sold products
-    const { data: saleItems, error } = await supabase
-      .from("sale_items")
-      .select("product_id")
-      .order("created_at", { ascending: false })
-      .limit(20)
+    try {
+      // First get recent sales that have a created_at column
+      const { data: recentSales, error: salesError } = await supabase
+        .from("sales")
+        .select("id")
+        .order("created_at", { ascending: false })
+        .limit(20)
 
-    if (error) {
+      if (salesError) throw salesError
+
+      if (!recentSales || recentSales.length === 0) {
+        return
+      }
+
+      // Get sale items from these recent sales
+      const { data: saleItems, error: itemsError } = await supabase
+        .from("sale_items")
+        .select("product_id")
+        .in(
+          "sale_id",
+          recentSales.map((sale) => sale.id),
+        )
+        .limit(20)
+
+      if (itemsError) throw itemsError
+
+      if (saleItems && saleItems.length > 0) {
+        // Get unique product IDs
+        const uniqueProductIds = Array.from(new Set(saleItems.map((item) => item.product_id)))
+
+        // Fetch product details
+        const { data: recentProductsData } = await supabase
+          .from("products")
+          .select("*")
+          .in("id", uniqueProductIds)
+          .gt("stock", 0)
+          .limit(8)
+
+        setRecentProducts(recentProductsData || [])
+      }
+    } catch (error) {
       console.error("Error fetching recent products:", error)
-      return
     }
+  }
 
-    if (saleItems && saleItems.length > 0) {
-      // Get unique product IDs
-      const uniqueProductIds = Array.from(new Set(saleItems.map((item) => item.product_id)))
+  const fetchLowStockProducts = async () => {
+    try {
+      // First get all products
+      const { data, error } = await supabase.from("products").select("*").order("stock")
 
-      // Fetch product details
-      const { data: recentProductsData } = await supabase
-        .from("products")
-        .select("*")
-        .in("id", uniqueProductIds)
-        .gt("stock", 0)
-        .limit(8)
+      if (error) throw error
 
-      setRecentProducts(recentProductsData || [])
+      // Then filter in JavaScript where stock < min_stock
+      const lowStock = data?.filter((product) => product.stock < product.min_stock) || []
+      setLowStockProducts(lowStock)
+    } catch (error) {
+      console.error("Error fetching low stock products:", error)
     }
   }
 
@@ -260,20 +308,53 @@ export default function POSPage() {
     setIsProcessing(true)
 
     try {
-      // Create sale record
-      const { data: saleData, error: saleError } = await supabase
-        .from("sales")
-        .insert({
-          cashier_id: user?.id || "",
-          total: calculateTotal(),
-          payment_method: paymentMethod,
-          status: "completed",
-        })
-        .select()
+      let saleId: string
 
-      if (saleError) throw saleError
+      if (editingSaleId) {
+        // We're updating an existing sale
 
-      const saleId = saleData[0].id
+        // First, get the original sale items to handle stock adjustments
+        const { data: originalItems } = await supabase.from("sale_items").select("*").eq("sale_id", editingSaleId)
+
+        if (originalItems) {
+          // Restore stock for all original items
+          for (const item of originalItems) {
+            await supabase.rpc("increment_stock", {
+              product_id: item.product_id,
+              quantity: item.quantity,
+            })
+          }
+
+          // Delete all original sale items
+          await supabase.from("sale_items").delete().eq("sale_id", editingSaleId)
+        }
+
+        // Update the sale record
+        await supabase
+          .from("sales")
+          .update({
+            total: calculateTotal(),
+            payment_method: paymentMethod,
+            status: "completed",
+          })
+          .eq("id", editingSaleId)
+
+        saleId = editingSaleId
+      } else {
+        // Create a new sale record
+        const { data: saleData, error: saleError } = await supabase
+          .from("sales")
+          .insert({
+            cashier_id: user?.id || "",
+            total: calculateTotal(),
+            payment_method: paymentMethod,
+            status: "completed",
+          })
+          .select()
+
+        if (saleError) throw saleError
+        saleId = saleData[0].id
+      }
 
       // Create sale items
       const saleItems = cart.map((item) => ({
@@ -299,7 +380,7 @@ export default function POSPage() {
       }
 
       toast({
-        title: "Sale completed",
+        title: editingSaleId ? "Sale updated" : "Sale completed",
         description: `Total: $${calculateTotal().toFixed(2)}`,
       })
 
@@ -311,9 +392,10 @@ export default function POSPage() {
         date: new Date(),
       })
 
-      // Reset cart
+      // Reset cart and editing state
       setCart([])
       setPaymentMethod("cash")
+      setEditingSaleId(null)
 
       // Refresh products and recent products
       fetchProducts()
@@ -371,21 +453,38 @@ export default function POSPage() {
       return
     }
 
-    // Add all items from the last sale to the cart
-    lastCompletedSale.items.forEach((item) => {
-      // Check if we have enough stock first
-      const currentProduct = products.find((p) => p.id === item.product.id)
-      if (currentProduct && currentProduct.stock >= item.quantity) {
-        for (let i = 0; i < item.quantity; i++) {
-          addToCart(currentProduct)
+    // Add all items from the last sale to the cart at once
+    setCart((prevCart) => {
+      const newCart = [...prevCart]
+
+      lastCompletedSale.items.forEach((item) => {
+        const currentProduct = products.find((p) => p.id === item.product.id)
+        if (currentProduct && currentProduct.stock >= item.quantity) {
+          const existingItemIndex = newCart.findIndex((cartItem) => cartItem.product.id === currentProduct.id)
+
+          if (existingItemIndex >= 0) {
+            newCart[existingItemIndex] = {
+              ...newCart[existingItemIndex],
+              quantity: newCart[existingItemIndex].quantity + item.quantity,
+              subtotal: (newCart[existingItemIndex].quantity + item.quantity) * currentProduct.price,
+            }
+          } else {
+            newCart.push({
+              product: currentProduct,
+              quantity: item.quantity,
+              subtotal: item.quantity * currentProduct.price,
+            })
+          }
+        } else {
+          toast({
+            title: "Stock issue",
+            description: `Not enough stock for ${currentProduct?.name || "product"}`,
+            variant: "destructive",
+          })
         }
-      } else {
-        toast({
-          title: "Stock issue",
-          description: `Not enough stock for ${item.product.name}`,
-          variant: "destructive",
-        })
-      }
+      })
+
+      return newCart
     })
 
     setPaymentMethod(lastCompletedSale.paymentMethod)
@@ -415,60 +514,158 @@ export default function POSPage() {
       // F4 to process checkout
       if (e.key === "F4" && !isProcessing && cart.length > 0) {
         e.preventDefault()
-        handleCheckout()
+        handleCheckoutRef.current()
       }
 
       // F5 to void last item
       if (e.key === "F5" && cart.length > 0) {
         e.preventDefault()
-        handleVoidLastItem()
+        handleVoidLastItemRef.current()
       }
 
       // F6 to repeat last sale
       if (e.key === "F6" && lastCompletedSale) {
         e.preventDefault()
-        handleRepeatLastSale()
+        handleRepeatLastSaleRef.current()
       }
     }
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [cart, isProcessing, lastCompletedSale, products, handleCheckout, handleVoidLastItem, handleRepeatLastSale])
+  }, [
+    cart,
+    isProcessing,
+    lastCompletedSale,
+    products,
+    isPendingSaleLoaded,
+    toast,
+    user,
+    paymentMethod,
+    calculateTotal,
+    fetchProducts,
+    fetchRecentProducts,
+    isPendingSaleLoaded,
+    toast,
+  ])
+
+  useEffect(() => {
+    const pendingSaleData = localStorage.getItem("pendingSale")
+    let isLoading = false // Add loading flag
+
+    if (pendingSaleData && !isPendingSaleLoaded && !isLoading) {
+      const loadPendingSale = async () => {
+        isLoading = true // Set loading flag
+        try {
+          const pendingSale = JSON.parse(pendingSaleData)
+
+          // Store the sale ID if we're editing an existing sale
+          if (pendingSale.id) {
+            setEditingSaleId(pendingSale.id)
+          }
+
+          // Get all product details at once
+          const { data: productsData } = await supabase
+            .from("products")
+            .select("*")
+            .in(
+              "id",
+              pendingSale.items.map((item: { product_id: string }) => item.product_id),
+            )
+
+          if (!productsData) {
+            throw new Error("Failed to fetch products")
+          }
+
+          // Create a map of products for easier lookup
+          const productsMap = new Map(productsData.map((product) => [product.id, product]))
+
+          // Build the cart items
+          const newCart: CartItem[] = []
+
+          pendingSale.items.forEach((item: { product_id: string; quantity: number }) => {
+            const product = productsMap.get(item.product_id)
+            if (product) {
+              newCart.push({
+                product,
+                quantity: item.quantity,
+                subtotal: item.quantity * product.price,
+              })
+            }
+          })
+
+          // Update cart and payment method in a single batch
+          setCart(newCart)
+          if (pendingSale.payment_method) {
+            setPaymentMethod(pendingSale.payment_method)
+          }
+
+          // Clear the pending sale from localStorage
+          localStorage.removeItem("pendingSale")
+
+          // Show success toast
+          toast({
+            title: "Sale loaded",
+            description: "The selected sale has been loaded into the cart",
+          })
+        } catch (error) {
+          console.error("Error loading pending sale:", error)
+          localStorage.removeItem("pendingSale")
+          toast({
+            title: "Error",
+            description: "Failed to load the sale",
+            variant: "destructive",
+          })
+        } finally {
+          setIsPendingSaleLoaded(true)
+          isLoading = false // Reset loading flag
+        }
+      }
+
+      loadPendingSale()
+    }
+
+    // Cleanup function
+    return () => {
+      localStorage.removeItem("pendingSale")
+    }
+  }, [])
+
+  const handleStockAdjustment = async () => {
+    if (!adjustingProduct || !newStockAmount) return
+
+    try {
+      const { error } = await supabase
+        .from("products")
+        .update({ stock: Number(newStockAmount) })
+        .eq("id", adjustingProduct.id)
+
+      if (error) throw error
+
+      toast({
+        title: "Stock updated",
+        description: `${adjustingProduct.name} stock updated to ${newStockAmount}`,
+      })
+
+      // Refresh products and low stock products
+      fetchProducts()
+      fetchLowStockProducts()
+      setIsStockAdjustmentDialogOpen(false)
+      setAdjustingProduct(null)
+      setNewStockAmount("")
+    } catch (error: any) {
+      console.error("Error updating stock:", error)
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update stock",
+        variant: "destructive",
+      })
+    }
+  }
 
   return (
     <div className="flex flex-col lg:flex-row gap-6">
-      <div className="flex gap-2 mb-4">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setIsChangeCalculatorOpen(true)}
-          className="flex items-center gap-1"
-        >
-          <Calculator className="h-4 w-4" />
-          <span>Change Calculator (F3)</span>
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleVoidLastItem}
-          disabled={cart.length === 0}
-          className="flex items-center gap-1"
-        >
-          <RotateCcw className="h-4 w-4" />
-          <span>Void Last Item (F5)</span>
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRepeatLastSale}
-          disabled={!lastCompletedSale}
-          className="flex items-center gap-1"
-        >
-          <Receipt className="h-4 w-4" />
-          <span>Repeat Last Sale (F6)</span>
-        </Button>
-      </div>
       <div className="lg:w-2/3 space-y-6">
+        {/* Search form moved to top */}
         <form onSubmit={handleBarcodeSubmit} className="flex items-center space-x-2">
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -487,6 +684,57 @@ export default function POSPage() {
           </Button>
         </form>
 
+        {/* Action buttons below search */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsChangeCalculatorOpen(true)}
+              className="flex items-center gap-2"
+            >
+              <Calculator className="h-4 w-4" />
+              Change Calculator (F3)
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleVoidLastItem}
+              disabled={cart.length === 0}
+              className="flex items-center gap-2"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Void Last Item (F5)
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRepeatLastSale}
+              disabled={!lastCompletedSale}
+              className="flex items-center gap-2"
+            >
+              <Receipt className="h-4 w-4" />
+              Repeat Last Sale (F6)
+            </Button>
+          </div>
+
+          {lowStockProducts.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsLowStockDialogOpen(true)}
+              className="flex items-center gap-2 border-red-500 text-red-600 hover:bg-red-50"
+            >
+              <AlertTriangle className="h-4 w-4" />
+              Low Stock Alert
+              <span className="ml-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs text-white">
+                {lowStockProducts.length}
+              </span>
+            </Button>
+          )}
+        </div>
+
+        {/* Rest of the content remains the same */}
         {recentProducts.length > 0 && (
           <div className="space-y-2">
             <h3 className="text-sm font-medium">Recently Sold Products</h3>
@@ -751,6 +999,83 @@ export default function POSPage() {
             <Button variant="outline" onClick={() => window.print()}>
               Print
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Low Stock Dialog */}
+      <Dialog open={isLowStockDialogOpen} onOpenChange={setIsLowStockDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center">
+              <AlertTriangle className="h-5 w-5 mr-2 text-amber-500" />
+              Low Stock Products
+            </DialogTitle>
+            <DialogDescription>
+              The following products are running low on stock and need to be replenished.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-auto">
+            <div className="space-y-3 py-2">
+              {lowStockProducts.map((product) => (
+                <div key={product.id} className="flex justify-between items-center p-3 border rounded-md">
+                  <div>
+                    <p className="font-medium">{product.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      Stock: <span className="text-red-600 font-medium">{product.stock}</span>
+                      {product.min_stock && <span> (Min: {product.min_stock})</span>}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setAdjustingProduct(product)
+                      setNewStockAmount(product.stock.toString())
+                      setIsStockAdjustmentDialogOpen(true)
+                    }}
+                  >
+                    Adjust Stock
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setIsLowStockDialogOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Stock Adjustment Dialog */}
+      <Dialog open={isStockAdjustmentDialogOpen} onOpenChange={setIsStockAdjustmentDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Adjust Stock</DialogTitle>
+            <DialogDescription>Update stock level for {adjustingProduct?.name}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="current-stock">Current Stock</Label>
+              <Input id="current-stock" value={adjustingProduct?.stock} disabled />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="new-stock">New Stock</Label>
+              <Input
+                id="new-stock"
+                type="number"
+                min="0"
+                value={newStockAmount}
+                onChange={(e) => setNewStockAmount(e.target.value)}
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsStockAdjustmentDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleStockAdjustment}>Update Stock</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

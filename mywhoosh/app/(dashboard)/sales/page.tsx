@@ -15,10 +15,9 @@ import { useToast } from "@/components/ui/use-toast"
 import { useAuth } from "@/contexts/auth-context"
 import { supabase } from "@/lib/supabase"
 // Add the Edit icon import alongside Eye and Trash
-import { CalendarIcon, Edit, Eye, Trash } from "lucide-react"
+import { CalendarIcon, Edit, Eye, Trash, Minus, Plus, ShoppingBag, XCircle } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
-import { Minus, Plus } from "lucide-react"
 import { format, subDays, startOfMonth, endOfMonth, startOfYear } from "date-fns"
 import type { DateRange } from "react-day-picker"
 import { Calendar } from "@/components/ui/calendar"
@@ -251,6 +250,11 @@ export default function SalesPage() {
     )
   }
 
+  // Add removeItemFromSale function
+  const removeItemFromSale = (itemId: string) => {
+    setEditingItems((prevItems) => prevItems.filter((item) => item.id !== itemId))
+  }
+
   // Add calculateEditedTotal function
   const calculateEditedTotal = () => {
     return editingItems.reduce((total, item) => total + item.subtotal, 0)
@@ -261,31 +265,61 @@ export default function SalesPage() {
     if (!selectedSale) return
 
     try {
+      // Get the original items to compare with edited items
+      const { data: originalItems, error: originalItemsError } = await supabase
+        .from("sale_items")
+        .select("*")
+        .eq("sale_id", selectedSale.id)
+
+      if (originalItemsError) throw originalItemsError
+
+      // Find removed items (items in original but not in editingItems)
+      const removedItems = originalItems.filter(
+        (originalItem) => !editingItems.some((editItem) => editItem.id === originalItem.id),
+      )
+
+      // Restore stock for removed items
+      for (const item of removedItems) {
+        const { error: stockError } = await supabase.rpc("increment_stock", {
+          product_id: item.product_id,
+          quantity: item.quantity,
+        })
+
+        if (stockError) throw stockError
+
+        // Delete the removed item
+        const { error: deleteItemError } = await supabase.from("sale_items").delete().eq("id", item.id)
+
+        if (deleteItemError) throw deleteItemError
+      }
+
       // Update stock for each product based on quantity changes
       for (const item of editingItems) {
-        const originalItem = saleItems.find((i) => i.id === item.id)
-        const quantityDifference = (originalItem?.quantity || 0) - item.quantity
+        const originalItem = originalItems.find((i) => i.id === item.id)
+        if (originalItem) {
+          const quantityDifference = originalItem.quantity - item.quantity
 
-        if (quantityDifference !== 0) {
-          // If quantity decreased, increase stock; if increased, decrease stock
-          const { error: stockError } = await supabase.rpc("increment_stock", {
-            product_id: item.product_id,
-            quantity: quantityDifference,
-          })
+          if (quantityDifference !== 0) {
+            // If quantity decreased, increase stock; if increased, decrease stock
+            const { error: stockError } = await supabase.rpc("increment_stock", {
+              product_id: item.product_id,
+              quantity: quantityDifference,
+            })
 
-          if (stockError) throw stockError
+            if (stockError) throw stockError
+          }
+
+          // Update sale item
+          const { error: updateItemError } = await supabase
+            .from("sale_items")
+            .update({
+              quantity: item.quantity,
+              subtotal: item.subtotal,
+            })
+            .eq("id", item.id)
+
+          if (updateItemError) throw updateItemError
         }
-
-        // Update sale item
-        const { error: updateItemError } = await supabase
-          .from("sale_items")
-          .update({
-            quantity: item.quantity,
-            subtotal: item.subtotal,
-          })
-          .eq("id", item.id)
-
-        if (updateItemError) throw updateItemError
       }
 
       // Update sale total
@@ -357,6 +391,22 @@ export default function SalesPage() {
         variant: "destructive",
       })
     }
+  }
+
+  // Update the openInPOS function to include the sale ID
+  const openInPOS = (sale: Sale) => {
+    // Store the sale data in localStorage to be accessed by the POS page
+    localStorage.setItem(
+      "pendingSale",
+      JSON.stringify({
+        id: sale.id,
+        items: saleItems,
+        payment_method: sale.payment_method,
+      }),
+    )
+
+    // Navigate to the POS page
+    router.push("/pos")
   }
 
   const formatDate = (dateString: string) => {
@@ -576,6 +626,18 @@ export default function SalesPage() {
             </div>
           </div>
           <DialogFooter>
+            {selectedSale && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsViewDialogOpen(false)
+                  openInPOS(selectedSale)
+                }}
+              >
+                <ShoppingBag className="mr-2 h-4 w-4" />
+                Open in POS
+              </Button>
+            )}
             <Button onClick={() => setIsViewDialogOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
@@ -656,6 +718,14 @@ export default function SalesPage() {
                               onClick={() => updateItemQuantity(item.id, item.quantity + 1)}
                             >
                               <Plus className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-destructive"
+                              onClick={() => removeItemFromSale(item.id)}
+                            >
+                              <XCircle className="h-3 w-3" />
                             </Button>
                           </div>
                         </TableCell>

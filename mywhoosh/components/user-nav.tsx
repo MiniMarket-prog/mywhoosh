@@ -36,7 +36,7 @@ export function UserNav() {
           <div className="flex flex-col space-y-1">
             <p className="text-sm font-medium leading-none">{profile?.full_name || profile?.username}</p>
             <p className="text-xs leading-none text-muted-foreground">
-              {profile?.role?.charAt(0).toUpperCase() + profile?.role?.slice(1)}
+              {profile?.role ? `${profile.role.charAt(0).toUpperCase()}${profile.role.slice(1)}` : "User"}
             </p>
           </div>
         </DropdownMenuLabel>

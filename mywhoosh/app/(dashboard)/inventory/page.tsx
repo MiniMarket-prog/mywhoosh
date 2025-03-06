@@ -27,7 +27,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/components/ui/use-toast"
 import { useAuth } from "@/contexts/auth-context"
 import { supabase } from "@/lib/supabase"
-import { Barcode, Edit, PlusCircle, Trash, Printer } from "lucide-react"
+import { Barcode, Edit, PlusCircle, Trash, Printer, Search } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState, useRef } from "react"
 import Script from "next/script"
@@ -45,6 +45,8 @@ type Product = {
 
 export default function InventoryPage() {
   const [products, setProducts] = useState<Product[]>([])
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
+  const [searchTerm, setSearchTerm] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
@@ -74,6 +76,21 @@ export default function InventoryPage() {
 
     fetchProducts()
   }, [profile, router])
+
+  useEffect(() => {
+    // Filter products based on search term
+    if (searchTerm.trim() === "") {
+      setFilteredProducts(products)
+    } else {
+      const searchTermLower = searchTerm.toLowerCase()
+      const filtered = products.filter(
+        (product) =>
+          product.name.toLowerCase().includes(searchTermLower) ||
+          product.barcode.toLowerCase().includes(searchTermLower),
+      )
+      setFilteredProducts(filtered)
+    }
+  }, [searchTerm, products])
 
   useEffect(() => {
     // Generate barcode when dialog is open and library is loaded
@@ -119,6 +136,7 @@ export default function InventoryPage() {
       })
     } else {
       setProducts(data || [])
+      setFilteredProducts(data || [])
     }
 
     setIsLoading(false)
@@ -383,6 +401,17 @@ export default function InventoryPage() {
         </Dialog>
       </div>
 
+      {/* Add search input */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          placeholder="Search by product name or barcode..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="pl-10"
+        />
+      </div>
+
       <Card>
         <CardHeader>
           <CardTitle>Products</CardTitle>
@@ -409,39 +438,53 @@ export default function InventoryPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {products.map((product) => (
-                  <TableRow key={product.id}>
-                    <TableCell className="font-medium">{product.name}</TableCell>
-                    <TableCell>{product.barcode}</TableCell>
-                    <TableCell className="capitalize">{product.category}</TableCell>
-                    <TableCell className="text-right">${product.price.toFixed(2)}</TableCell>
-                    <TableCell className="text-right">${product.cost_price.toFixed(2)}</TableCell>
-                    <TableCell className="text-right">{product.stock}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            setEditingProduct(product)
-                            setIsEditDialogOpen(true)
-                          }}
-                        >
-                          <Edit className="h-4 w-4" />
-                          <span className="sr-only">Edit</span>
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleDeleteProduct(product.id)}>
-                          <Trash className="h-4 w-4" />
-                          <span className="sr-only">Delete</span>
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handlePrintBarcode(product)}>
-                          <Printer className="h-4 w-4" />
-                          <span className="sr-only">Print Barcode</span>
-                        </Button>
+                {filteredProducts.length > 0 ? (
+                  filteredProducts.map((product) => (
+                    <TableRow key={product.id}>
+                      <TableCell className="font-medium">{product.name}</TableCell>
+                      <TableCell>{product.barcode}</TableCell>
+                      <TableCell className="capitalize">{product.category}</TableCell>
+                      <TableCell className="text-right">${product.price.toFixed(2)}</TableCell>
+                      <TableCell className="text-right">${product.cost_price.toFixed(2)}</TableCell>
+                      <TableCell className="text-right">{product.stock}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                              setEditingProduct(product)
+                              setIsEditDialogOpen(true)
+                            }}
+                          >
+                            <Edit className="h-4 w-4" />
+                            <span className="sr-only">Edit</span>
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => handleDeleteProduct(product.id)}>
+                            <Trash className="h-4 w-4" />
+                            <span className="sr-only">Delete</span>
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => handlePrintBarcode(product)}>
+                            <Printer className="h-4 w-4" />
+                            <span className="sr-only">Print Barcode</span>
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-6">
+                      <div className="flex flex-col items-center justify-center">
+                        <Search className="h-8 w-8 text-muted-foreground mb-2" />
+                        <p className="text-lg font-medium">No products found</p>
+                        <p className="text-sm text-muted-foreground">
+                          Try a different search term or clear the search to see all products
+                        </p>
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                )}
               </TableBody>
             </Table>
           )}
@@ -580,9 +623,6 @@ export default function InventoryPage() {
               <div className="flex justify-center bg-white p-4 w-full">
                 <svg id="barcode"></svg>
               </div>
-
-              {/* Remove this section since the number will be displayed with the barcode */}
-              {/* <div className="text-xs">{selectedProduct?.barcode}</div> */}
 
               {/* Price */}
               <div className="text-lg font-bold">${selectedProduct?.price.toFixed(2)}</div>
